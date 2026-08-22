@@ -5612,6 +5612,7 @@ dependencies = [
 [[package]]
 name = "wayclip-core"
 version = "0.1.2"
+source = "git+https://github.com/Wayclip/core#eedbc810c64ab6865c3afdb6c366a9f30589dae4"
 dependencies = [
  "ashpd",
  "bitflags 2.13.1",

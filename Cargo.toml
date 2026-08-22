@@ -37,7 +37,8 @@ zbus = { version = "5.16.0", default-features = false, features = ["blocking"] }
 mpsc = "0.3.0"
 discord-rich-presence = "1.1.0"
 rodio = "0.22.2"
-wayclip-core = { path = "../core/", default-features = false, features = [
+# I will 100% move to a crate (version magement better)
+wayclip-core = { git = "https://github.com/Wayclip/core", default-features = false, features = [
   "errors",
 ] }
 tokio-util = "0.7.19"
