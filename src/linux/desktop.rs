@@ -35,7 +35,6 @@ pub enum DesktopEnvironmentType {
 pub struct DesktopEnvironmentManager {
     pub daemon: Arc<Mutex<DaemonCore>>,
     pub desktop: DesktopEnvironmentType,
-    pub session: SessionType,
     pub trigger_combo: WayclipKeyCombo,
 }
 
@@ -44,12 +43,11 @@ impl DesktopEnvironmentManager {
         daemon: Arc<Mutex<DaemonCore>>,
         trigger_combo: WayclipKeyCombo,
     ) -> Result<Self, WayclipError> {
-        let (desktop, session) = Self::get_env_session()?;
+        let (desktop, _) = Self::get_env_session()?;
 
         Ok(Self {
             daemon,
             desktop,
-            session,
             trigger_combo,
         })
     }

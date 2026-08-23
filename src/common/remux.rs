@@ -8,7 +8,7 @@ use gstreamer::{
 use gstreamer_app::AppSrc;
 use log::{error, info, warn};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -615,11 +615,7 @@ impl RemuxHandler {
 
 /// To avoid deadlocks
 impl PreviewGenerator for RemuxHandler {
-    fn generate_preview(
-        &self,
-        video_path: &PathBuf,
-        preview_path: &PathBuf,
-    ) -> Result<(), WayclipError> {
+    fn generate_preview(&self, video_path: &Path, preview_path: &Path) -> Result<(), WayclipError> {
         self.generate_preview(
             video_path.to_path_buf(),
             preview_path.to_path_buf(),

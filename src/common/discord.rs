@@ -5,7 +5,7 @@ use discord_rich_presence::{
 use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const DISCORD_CLIENT_ID: &str = "1416659610416316466";
+const DISCORD_CLIENT_ID: &str = "1416659610416316466";
 
 enum PresenceCommand {
     Recording { game: Option<String> },

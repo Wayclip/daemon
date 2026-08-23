@@ -163,7 +163,7 @@ impl DaemonCore {
                 .request_pad_simple("sink_%u")
                 .ok_or_else(|| WayclipError::Audio("Couldnt request mix sink pad".into()))?;
 
-            mix_sink_pad.set_property("volume", audio_node.level);
+            mix_sink_pad.set_property("volume", audio_node.level.0);
 
             let audio_source_pipeline = [
                 pipewiresrc,
