@@ -4,8 +4,6 @@ use crate::linux::manager::DaemonManager;
 use ksni::MenuItem;
 use ksni::TrayMethods;
 use ksni::menu::StandardItem;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 use sysinfo::Pid;
 use sysinfo::System;
@@ -13,6 +11,12 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::tray::TraySettings;
+
+/// Make this logo compile-time dependant
+static TRAY_LOGO_PNG: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/branding/pngs/wayclip-256x256.png"
+));
 
 // courrently this is only for linux, didnt find a tray lib for windows, but i bet its gonna be rly
 // different anyway
@@ -118,14 +122,7 @@ impl WayclipTray {
     }
 
     pub fn get_png(&self) -> Vec<u8> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap_or(&PathBuf::default())
-            .join("branding")
-            .join("pngs")
-            .join("wayclip-256x256-p8.png");
-
-        fs::read(path).unwrap_or_default()
+        TRAY_LOGO_PNG.to_vec()
     }
 }
 
@@ -136,14 +133,7 @@ impl ksni::Tray for WayclipTray {
     }
 
     fn icon_name(&self) -> String {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap_or(&PathBuf::default())
-            .join("branding")
-            .join("svgs")
-            .join("wayclip.svg")
-            .to_string_lossy()
-            .to_string()
+        String::from("wayclip")
     }
 
     fn title(&self) -> String {

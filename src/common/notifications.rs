@@ -53,13 +53,8 @@ impl NotificationEvent {
         }
     }
 
-    pub fn get_icon(&self) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap_or(&PathBuf::default())
-            .join("branding")
-            .join("svgs")
-            .join("wayclip.svg")
+    pub fn get_icon(&self) -> &'static str {
+        "wayclip"
     }
 
     pub fn get_timeout_ms(&self) -> i32 {
@@ -177,10 +172,7 @@ impl NotificationManager {
         let summary = event.get_summary();
         let body = event.get_body(content);
         let urgency = event.get_urgency();
-        let icon_path = event.get_icon();
-        let icon = icon_path
-            .to_str()
-            .ok_or_else(|| WayclipError::Validation("Could not convert logo to str".into()))?;
+        let icon = event.get_icon();
         let timeout_ms = event.get_timeout_ms();
 
         let conn = if let Some(conn) = DBUS_CONNECTION.get() {

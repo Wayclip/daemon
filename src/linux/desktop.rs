@@ -53,14 +53,16 @@ impl DesktopEnvironmentManager {
     }
 
     pub fn get_env_session() -> Result<(DesktopEnvironmentType, SessionType), WayclipError> {
-        let session_env = env::var("XDG_SESSION_TYPE")?;
+        // default to wayland since way-clip. way -> wayland. haha
+        let session_env = env::var("XDG_SESSION_TYPE").unwrap_or("wayland".to_string());
         let session = match session_env.to_lowercase().as_str() {
             "wayland" => SessionType::Wayland,
             "x11" | "xorg" => SessionType::X11,
             _ => SessionType::Unknown,
         };
 
-        let desktop_env = env::var("XDG_CURRENT_DESKTOP")?;
+        // safer to assume gnome is being used
+        let desktop_env = env::var("XDG_CURRENT_DESKTOP").unwrap_or("gnome".to_string());
         let desktop = match desktop_env.to_lowercase().as_str() {
             "hyprland" => DesktopEnvironmentType::Hyprland,
             "gnome" => DesktopEnvironmentType::Gnome,
@@ -104,8 +106,8 @@ impl DesktopEnvironmentManager {
             .parent()
             .ok_or_else(|| WayclipError::NotFound("No parent found".into()))?;
 
-        // TODO: for now the crate is named `cli`, hence the binary would also be called this way
-        let process_path = parent.join("cli");
+        // TODO: for now the CLI crate is named `wayclip-cli-linux`, hence the binary would also be called this way
+        let process_path = parent.join("wayclip-cli-linux");
         let process_string = process_path
             .to_str()
             .ok_or_else(|| WayclipError::Validation("Could not convert to str".into()))?

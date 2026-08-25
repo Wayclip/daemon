@@ -146,11 +146,42 @@ impl DaemonCore {
             ring_buffer.begin_resync();
         }
 
+        // A cleaner way to flush fully the old pipeline
         if let Some(old) = old_pipeline {
-            let _ = old.set_state(gstreamer::State::Null);
-            let (result, _cur, _pending) = old.state(gstreamer::ClockTime::from_seconds(5));
-            if result.is_err() {
-                log::warn!("Old pipeline failed to reach NULL cleanly before rebuilding");
+            log::info!("Tearing down old pipeline");
+
+            old.set_state(gstreamer::State::Null).ok();
+
+            let mut reached = false;
+            for attempt in 1..=5 {
+                if let Some(bus) = old.bus() {
+                    while let Some(msg) = bus.timed_pop(gstreamer::ClockTime::from_mseconds(50)) {
+                        log::trace!("Teardown bus message drained: {:?}", msg.type_());
+                    }
+                }
+
+                if let (Ok(_), cur, _) = old.state(gstreamer::ClockTime::from_seconds(1))
+                    && cur == gstreamer::State::Null
+                {
+                    reached = true;
+                    log::info!(
+                        "Old pipeline reached NULL successfully on attempt {}",
+                        attempt
+                    );
+                    break;
+                }
+
+                std::thread::sleep(Duration::from_millis(100));
+            }
+
+            if !reached {
+                log::warn!(
+                    "Old pipeline failed to reach NULL cleanly after multiple attempts; forcing teardown"
+                );
+            }
+
+            if let Some(bus) = old.bus() {
+                bus.set_flushing(true);
             }
         }
 

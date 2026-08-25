@@ -34,7 +34,7 @@ pub fn init_default_audio_device(
 impl DaemonCore {
     pub async fn check_audio_devices(
         pipewire_manager: &PipewireManager,
-        audio_settings: &AudioSettings,
+        audio_settings: &mut AudioSettings,
     ) -> Result<(), WayclipError> {
         let mut reciever = pipewire_manager.subscribe();
 

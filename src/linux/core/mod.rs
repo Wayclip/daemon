@@ -115,13 +115,14 @@ impl DaemonCore {
 
     pub async fn build_full_pipeline(
         daemon_arc: Arc<tokio::sync::Mutex<Self>>,
-        config: RecordingConfig,
+        mut config: RecordingConfig,
     ) -> Result<gstreamer::Pipeline, WayclipError> {
         let pipewire_manager = {
             let daemon = daemon_arc.lock().await;
             daemon.pipewire_manager.clone()
         };
-        Self::check_audio_devices(&pipewire_manager, &config.audio).await?;
+
+        Self::check_audio_devices(&pipewire_manager, &mut config.audio).await?;
 
         let screencast = match Self::negotiate_screencast().await {
             Ok(negotiation) => negotiation,

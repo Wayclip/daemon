@@ -175,6 +175,16 @@ impl DaemonCore {
                         .features(["memory:GLMemory"])
                         .build(),
                 );
+                // caps_filter_glupload.set_property(
+                //     "caps",
+                //     gstreamer::Caps::builder("video/x-raw")
+                //         .features(["memory:GLMemory"])
+                //         .field("format", "NV12")
+                //         .build(),
+                // );
+                let glcolorconvert_pre = gstreamer::ElementFactory::make("glcolorconvert")
+                    .name("video_glcolorconvert_pre")
+                    .build()?;
 
                 let glcolorscale = gstreamer::ElementFactory::make("glcolorscale")
                     .name("video_glcolorscale")
@@ -193,8 +203,8 @@ impl DaemonCore {
                         .build(),
                 );
 
-                let glcolorconvert = gstreamer::ElementFactory::make("glcolorconvert")
-                    .name("video_glcolorconvert")
+                let glcolorconvert_post = gstreamer::ElementFactory::make("glcolorconvert")
+                    .name("video_glcolorconvert_post")
                     .build()?;
 
                 let videorate = gstreamer::ElementFactory::make("videorate")
@@ -223,9 +233,10 @@ impl DaemonCore {
                         video_queue_1.clone(),
                         glupload,
                         caps_filter_glupload,
+                        glcolorconvert_pre,
                         glcolorscale,
                         caps_filter_glscale,
-                        glcolorconvert,
+                        glcolorconvert_post,
                         videorate,
                     ],
                     caps_filter_glformat,
