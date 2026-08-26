@@ -1,13 +1,17 @@
 use rodio::{Decoder, DeviceSinkBuilder, Player};
-use std::{collections::HashMap, fs::File, path::PathBuf, sync::OnceLock};
+use std::io::Cursor;
+use std::{collections::HashMap, sync::OnceLock};
 use strum_macros::FromRepr;
 use wayclip_core::models::error::WayclipError;
-use wayclip_core::settings::notifications::NotificationSettings;
+use wayclip_core::settings::notifications::{
+    NotificationSettings, SOUND_SAVE_ERROR, SOUND_SAVE_SUCCESS,
+};
 use zbus::blocking::Connection;
 use zbus::zvariant::Value;
 
 // TODO: This file violates the common principle, since we are accessing DBUS as a direct method of
 // playing sound.
+// UPD: Which is proper and what should be done
 pub struct NotificationManager;
 
 pub const DBUS_NOTIFICATION_DESTINATION: &str = "org.freedesktop.Notifications";
@@ -81,16 +85,11 @@ pub enum NotificationSound {
 }
 
 impl NotificationSound {
-    pub fn get_sound_path(&self) -> PathBuf {
-        let sound_name = match self {
-            Self::Success => "success.wav",
-            Self::Error => "error.wav",
-        };
-
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("static")
-            .join("sounds")
-            .join(sound_name)
+    pub fn get_sound_bytes(&self) -> &'static [u8] {
+        match self {
+            Self::Success => SOUND_SAVE_SUCCESS,
+            Self::Error => SOUND_SAVE_ERROR,
+        }
     }
 }
 
@@ -151,14 +150,11 @@ impl NotificationManager {
     }
 
     fn play_sound(sound: NotificationSound) -> Result<(), WayclipError> {
-        let path = sound.get_sound_path();
-        log::debug!("Playing sound: {:?}", path);
-
+        let bytes = sound.get_sound_bytes();
         let device_sink = DeviceSinkBuilder::open_default_sink()?;
 
         let player = Player::connect_new(device_sink.mixer());
-        let file = File::open(&path)?;
-        let source = Decoder::try_from(file)?;
+        let source = Decoder::try_from(Cursor::new(bytes))?;
 
         player.append(source);
 
