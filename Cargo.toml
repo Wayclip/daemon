@@ -1,34 +1,39 @@
 [package]
 name = "wayclip-daemon"
 version = "0.1.0"
-authors = ["konyogony <me@konyogony.dev>", "PadowYT2 <me@padow.dev>"]
+edition = "2024"
 description = "Recording and management of Wayclip daemon"
+readme = "README.md"
 repository = "https://github.com/Wayclip/daemon"
 license = "MIT"
-edition = "2024"
-readme = "README.md"
 
 [dependencies]
-env_logger = "0.11.11"
-gstreamer = "0.25.3"
-gstreamer-app = "0.25.2"
-gstreamer-pbutils = "0.25.2"
-log = "0.4.33"
-ashpd = { version = "0.13.11", features = [
-  "pipewire",
-  "tracing",
-  "tokio",
-  "backend",
-  "frontend",
-] }
+ashpd = {
+  version = "0.13.11",
+  features = [
+    "backend",
+    "frontend",
+    "pipewire",
+    "tokio",
+    "tracing",
+  ]
+}
 chrono = { version = "0.4.45", features = ["serde"] }
 dirs = "6.0.0"
+discord-rich-presence = "1.1.0"
+env_logger = "0.11.11"
 futures = "0.3.32"
 futures-util = "0.3.32"
 gilrs = "0.11.2"
+gstreamer = "0.25.3"
+gstreamer-app = "0.25.2"
+gstreamer-pbutils = "0.25.2"
 ksni = "0.3.6"
+log = "0.4.33"
+mpsc = "0.3.0"
 nanoid = "0.5.0"
 pipewire = "0.9.0"
+rodio = "0.22.2"
 sd-notify = "0.5.0"
 serde = "1.0.228"
 serde_json = "1.0.150"
@@ -36,16 +41,16 @@ strum = "0.28.0"
 strum_macros = "0.28.0"
 sysinfo = "0.39.3"
 tokio = { version = "1.52.3", features = ["full"] }
+tokio-util = "0.7.19"
 url = { version = "2.5.8", features = ["serde"] }
+wayclip-core = { version = "0.1.2", features = ["errors"] }
 wayclip-global-hotkey = "0.7.0"
 zbus = { version = "5.16.0", default-features = false, features = ["blocking"] }
-mpsc = "0.3.0"
-discord-rich-presence = "1.1.0"
-rodio = "0.22.2"
-wayclip-core = { version = "0.1.2", features = ["errors"] }
-tokio-util = "0.7.19"
 
 [features]
 default = ["linux"]
-windows = []
 linux = []
+windows = []
+
+[patch.crates-io]
+wayclip-core = { path = "../core/" }
