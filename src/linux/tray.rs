@@ -1,3 +1,4 @@
+use crate::ShutdownReason;
 use crate::linux::core::DaemonCore;
 use crate::linux::core::types::DaemonStatus;
 use crate::linux::manager::DaemonManager;
@@ -8,6 +9,7 @@ use std::sync::Arc;
 use sysinfo::Pid;
 use sysinfo::System;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::tray::TraySettings;
@@ -38,6 +40,7 @@ pub struct WayclipTray {
     pub stats: Option<TrayStats>,
     pub config: TraySettings,
     pub cancel_token: CancellationToken,
+    pub shutdown_sender: mpsc::Sender<ShutdownReason>,
 }
 
 impl WayclipTray {
@@ -45,6 +48,7 @@ impl WayclipTray {
         daemon: Arc<Mutex<DaemonCore>>,
         config: TraySettings,
         cancel_token: CancellationToken,
+        shutdown_sender: mpsc::Sender<ShutdownReason>,
     ) -> Result<(), WayclipError> {
         if !config.enabled {
             return Ok(());
@@ -56,6 +60,7 @@ impl WayclipTray {
             stats: None,
             config,
             cancel_token: cancel_token.clone(),
+            shutdown_sender,
         };
         let poll = tray.config.show_stats || tray.config.show_status;
 
@@ -77,7 +82,6 @@ impl WayclipTray {
                      _ = cancel_token.cancelled() => {
                          log::debug!("Tray polling loop shutting down");
                          break;
-
                      }
                      _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
                          // inf loop, update info on a specific pid
@@ -188,14 +192,10 @@ impl ksni::Tray for WayclipTray {
                 label: "Exit Tray & Daemon".into(),
                 activate: Box::new(|this: &mut Self| {
                     let token = this.cancel_token.clone();
+                    let sender = this.shutdown_sender.clone();
                     tokio::spawn(async move {
-                        let stopped_via_systemd = match DaemonManager::new().await {
-                            Ok(mgr) => mgr.stop_daemon().await.is_ok(),
-                            Err(_) => false,
-                        };
-                        if !stopped_via_systemd {
-                            token.cancel();
-                        }
+                        let _ = sender.send(ShutdownReason::TrayExit).await;
+                        token.cancel();
                     });
                 }),
                 visible: self.config.show_exit,

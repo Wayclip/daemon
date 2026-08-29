@@ -12,6 +12,7 @@ use wayclip_core::models::error::WayclipError;
 
 const DEFAULT_SOURCE_TYPE: SourceType = SourceType::Monitor;
 const DEFAULT_RESTORE_TOKEN_PATH: &str = "wayclip/restore_token";
+const DEFAULT_CURSOR_MODE: CursorMode = CursorMode::Embedded;
 const DEFAULT_PERSIST_MODE: PersistMode = PersistMode::ExplicitlyRevoked;
 
 pub struct ScreencastNegotiation {
@@ -35,9 +36,22 @@ impl DaemonCore {
         // Try to get a token, if it exists
         let existing_restore_token = Self::load_restore_token()?;
 
+        let mode = match pipewire_proxy.available_cursor_modes().await {
+            Ok(modes) => {
+                if modes.contains(DEFAULT_CURSOR_MODE) {
+                    DEFAULT_CURSOR_MODE
+                } else {
+                    CursorMode::Hidden
+                }
+            }
+            // Honestly, its better to Err since user has a broken installation of xdg-portal, but
+            // its easier to suggest a mode this way
+            Err(_) => CursorMode::Hidden,
+        };
+
         // Finally its cleaner
         let select_sources_options = SelectSourcesOptions::default()
-            .set_cursor_mode(CursorMode::Embedded)
+            .set_cursor_mode(mode)
             .set_restore_token(existing_restore_token.as_deref())
             .set_persist_mode(DEFAULT_PERSIST_MODE)
             .set_multiple(false)

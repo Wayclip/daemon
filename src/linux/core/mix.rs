@@ -7,7 +7,8 @@ use gstreamer::ClockTime;
 use gstreamer::glib::object::Cast;
 use gstreamer::prelude::{ElementExtManual, GstBinExt, ObjectExt};
 use log::error;
-use std::time::Instant;
+use std::sync::atomic::Ordering;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::recording::AudioSettings;
 
@@ -18,6 +19,7 @@ impl DaemonCore {
         content_type: ContentType,
     ) -> Result<(), WayclipError> {
         let ring_buffer_clone = self.ring_buffer.clone();
+        let last_video_frame_time = self.last_video_frame_time.clone();
         appsink.set_callbacks(
             gstreamer_app::AppSinkCallbacks::builder()
                 .new_sample(move |sink| {
@@ -35,6 +37,12 @@ impl DaemonCore {
 
                             match content_type {
                                 ContentType::Video => {
+                                    let now_ms = SystemTime::now()
+
+                                        .duration_since(UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as u64;
+                                    last_video_frame_time.store(now_ms, Ordering::Release);
                                     if ring_buffer.awaiting_video_resync {
                                         if let Some(reference) = ring_buffer.video_resync_reference {
                                             let gap = ClockTime::from_mseconds(33);

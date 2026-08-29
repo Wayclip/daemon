@@ -10,6 +10,7 @@ use std::process::exit;
 use std::sync::Arc;
 use tokio::signal::unix::SignalKind;
 use tokio::signal::unix::signal;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::UserSettings;
@@ -22,6 +23,11 @@ pub const DEFAULT_SYSTEMD_SERVICE: &str = "wayclip-daemon.service";
 pub const DEFAULT_DBUS_SERVICE: &str = "org.wayclip.Daemon";
 pub const DEFAULT_MODE: &str = "replace";
 pub const DEFAULT_INTERFACE_PATH: &str = "/org/wayclip/Daemon";
+
+pub enum ShutdownReason {
+    TrayExit,
+    FatalError(String),
+}
 
 // DaemonManager will use systemd to start/stop/create/kill instances of the Daemon
 pub struct DaemonManager {
@@ -113,6 +119,7 @@ impl DaemonManager {
             .build()
             .await?;
 
+        let (shutdown_sender, mut shutdown_reciever) = mpsc::channel::<ShutdownReason>(10);
         let cancel_token = CancellationToken::new();
 
         DaemonCore::init(
@@ -120,6 +127,7 @@ impl DaemonManager {
             recording_config.clone(),
             settings.game_discovery.clone(),
             cancel_token.clone(),
+            shutdown_sender.clone(),
         )
         .await?;
 
@@ -140,10 +148,16 @@ impl DaemonManager {
         let tray_daemon_reference = inner.clone();
         let tray_config = settings.tray.clone();
         let cancel_token_clone = cancel_token.clone();
+        let shutdown_sender_clone = shutdown_sender.clone();
         tokio::spawn(async move {
             info!("Starting System Tray...");
-            if let Err(e) =
-                WayclipTray::run_tray(tray_daemon_reference, tray_config, cancel_token_clone).await
+            if let Err(e) = WayclipTray::run_tray(
+                tray_daemon_reference,
+                tray_config,
+                cancel_token_clone,
+                shutdown_sender_clone,
+            )
+            .await
             {
                 log::error!("Tray Error: {:?}", e);
             }
@@ -154,18 +168,30 @@ impl DaemonManager {
         // basically now we wait for Ctrl+C
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
-        let mut sighup = signal(SignalKind::hangup())?;
+        //let mut sighup = signal(SignalKind::hangup())?;
 
         let mut exit_code = 0;
 
         tokio::select! {
             _ = sigint.recv() => info!("SIGINT (Ctrl+C) received, shutting down..."),
             _ = sigterm.recv() => info!("SIGTERM received, shutting down..."),
-            _ = sighup.recv() => info!("SIGHUP received, shutting down..."),
-            _ = cancel_token.cancelled() => {
-                log::error!("Internal error triggered daemon shutdown.");
-                exit_code = 1;
+            reason = shutdown_reciever.recv() => {
+                match reason {
+                    Some(ShutdownReason::TrayExit) => {
+                        info!("Tray exit");
+                        exit_code = 0;
+                    }
+                    Some(ShutdownReason::FatalError(err)) => {
+                        log::error!("Fatal error: {}", err);
+                        exit_code = 1;
+                    }
+                    None => {
+                        info!("Channel dropped");
+                        exit_code = 1;
+                    }
+                }
             }
+            //_ = sighup.recv() => info!("SIGHUP received, shutting down..."),
         }
 
         cancel_token.cancel();

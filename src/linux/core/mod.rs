@@ -1,3 +1,4 @@
+use crate::ShutdownReason;
 use crate::common::discord::DiscordPresenceManager;
 use crate::common::notifications::{NotificationEvent, NotificationManager};
 use crate::common::ring::RingBuffer;
@@ -13,6 +14,7 @@ use sd_notify::NotifyState;
 use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::discovery::GameDiscovery;
@@ -28,7 +30,6 @@ pub(crate) mod types;
 pub(crate) mod video;
 pub(crate) mod watcher;
 
-//const DEFAULT_CURSOR_MODE: CursorMode = CursorMode::Embedded;
 // const DEFAULT_ALLOW_MULTIPLE: bool = false;
 // Yes this is a hack i found online
 // changed it ACTUALLY be downstream now
@@ -42,6 +43,7 @@ pub(crate) const DEFAULT_PIPEWIRE_TIMEOUT: u64 = 4;
 pub struct DaemonCore {
     id: String,
     generation: Arc<AtomicU64>,
+    pub(crate) last_video_frame_time: Arc<AtomicU64>,
     status: DaemonStatus,
     discovery: Discovery,
     ring_buffer: Arc<Mutex<RingBuffer>>,
@@ -64,6 +66,7 @@ impl DaemonCore {
         config: RecordingConfig,
         discovery: GameDiscovery,
         cancel_token: CancellationToken,
+        shutdown_sender: mpsc::Sender<ShutdownReason>,
     ) -> Result<(), WayclipError> {
         {
             let mut daemon = daemon_arc.lock().await;
@@ -79,11 +82,12 @@ impl DaemonCore {
 
         let pipeline = Self::build_full_pipeline(daemon_arc.clone(), config).await?;
 
-        let (generation, current_gen) = {
+        let (generation, current_gen, last_video_frame_time) = {
             let daemon = daemon_arc.lock().await;
             (
                 daemon.generation.clone(),
                 daemon.generation.load(Ordering::Acquire),
+                daemon.last_video_frame_time.clone(),
             )
         };
 
@@ -91,8 +95,10 @@ impl DaemonCore {
             daemon_arc.clone(),
             &pipeline,
             generation,
+            last_video_frame_time,
             current_gen,
             cancel_token.clone(),
+            shutdown_sender.clone(),
         )?;
         if discovery.enabled {
             Self::spawn_discovery_update(
@@ -243,6 +249,7 @@ impl DaemonCore {
             discovery: Discovery::new()?,
             status: DaemonStatus::Inactive,
             generation: Arc::new(AtomicU64::new(1)),
+            last_video_frame_time: Arc::new(AtomicU64::new(0)),
             ring_buffer: Arc::new(Mutex::new(RingBuffer::new(ClockTime::from_seconds(
                 max_duration,
             )))),
