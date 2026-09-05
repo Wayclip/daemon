@@ -256,6 +256,17 @@ impl RingBuffer {
                     self.video_frames.clear();
                     self.video_frames.push_back(latest);
                     self.audio_frames.clear();
+                    self.video_first_pts = None;
+                    self.audio_first_pts = None;
+                    self.video_start_instant = None;
+                    self.audio_start_instant = None;
+                    self.video_pts_offset_ns = 0;
+                    self.audio_pts_offset_ns = 0;
+                    self.awaiting_video_resync = false;
+                    self.awaiting_audio_resync = false;
+                    self.video_resync_reference = None;
+                    self.audio_resync_reference = None;
+
                     return Ok(());
                 } else {
                     self.video_frames.pop_back();

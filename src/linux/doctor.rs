@@ -258,7 +258,6 @@ impl Doctor {
         let element_checks: Vec<(&str, bool)> = vec![
             // default ones
             ("pipewiresrc", true),
-            ("watchdog", true),
             ("queue", true),
             ("capsfilter", true),
             ("appsink", true),

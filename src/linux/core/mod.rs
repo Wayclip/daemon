@@ -44,6 +44,7 @@ pub struct DaemonCore {
     id: String,
     generation: Arc<AtomicU64>,
     pub(crate) last_video_frame_time: Arc<AtomicU64>,
+    pub(crate) last_audio_frame_time: Arc<AtomicU64>,
     status: DaemonStatus,
     discovery: Discovery,
     ring_buffer: Arc<Mutex<RingBuffer>>,
@@ -82,12 +83,15 @@ impl DaemonCore {
 
         let pipeline = Self::build_full_pipeline(daemon_arc.clone(), config).await?;
 
-        let (generation, current_gen, last_video_frame_time) = {
+        let (generation, current_gen, last_video_frame_time, last_audio_frame_time, audio_expected) = {
             let daemon = daemon_arc.lock().await;
             (
                 daemon.generation.clone(),
                 daemon.generation.load(Ordering::Acquire),
                 daemon.last_video_frame_time.clone(),
+                daemon.last_audio_frame_time.clone(),
+                daemon.recording_config.audio.microphone.enabled
+                    || daemon.recording_config.audio.background.enabled,
             )
         };
 
@@ -96,6 +100,8 @@ impl DaemonCore {
             &pipeline,
             generation,
             last_video_frame_time,
+            last_audio_frame_time,
+            audio_expected,
             current_gen,
             cancel_token.clone(),
             shutdown_sender.clone(),
@@ -250,6 +256,7 @@ impl DaemonCore {
             status: DaemonStatus::Inactive,
             generation: Arc::new(AtomicU64::new(1)),
             last_video_frame_time: Arc::new(AtomicU64::new(0)),
+            last_audio_frame_time: Arc::new(AtomicU64::new(0)),
             ring_buffer: Arc::new(Mutex::new(RingBuffer::new(ClockTime::from_seconds(
                 max_duration,
             )))),

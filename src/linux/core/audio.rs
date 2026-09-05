@@ -116,6 +116,14 @@ impl DaemonCore {
             .pipewire_manager
             .get_node_id_from_node_name(audio_node.node_name.as_str());
 
+        if audio_node.enabled && node_id.is_none() {
+            log::error!(
+                "audio device '{}' ({:?}) is enabled but has no PipeWire node id. skipping this audio source",
+                audio_node.node_name,
+                audio_node_type
+            );
+        }
+
         if audio_node.enabled
             && let Some(id) = node_id
         {
@@ -130,12 +138,15 @@ impl DaemonCore {
                 .name(format!("audio_src_{}", safe_name))
                 .build()?;
 
+            let mut properties_builder =
+                gstreamer::Structure::builder("properties").field("node.always-process", true);
+
             if audio_node_type == DefaultDeviceType::Background {
-                let properties = gstreamer::Structure::builder("properties")
-                    .field("stream.capture.sink", true)
-                    .build();
-                pipewiresrc.set_property("stream-properties", &properties);
+                properties_builder = properties_builder.field("stream.capture.sink", true);
             }
+
+            let properties = properties_builder.build();
+            pipewiresrc.set_property("stream-properties", &properties);
 
             let queue = gstreamer::ElementFactory::make("queue")
                 .name(format!("audio_queue_{}", safe_name))

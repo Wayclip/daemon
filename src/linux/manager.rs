@@ -132,7 +132,7 @@ impl DaemonManager {
         .await?;
 
         let shortcut_daemon_reference = inner.clone();
-        let desktop = DesktopEnvironmentManager::new(
+        let mut desktop = DesktopEnvironmentManager::new(
             shortcut_daemon_reference,
             settings.shortcuts.save_clip,
         )?;

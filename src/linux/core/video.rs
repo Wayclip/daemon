@@ -16,7 +16,6 @@ const DEFAULT_MAX_SIZE_BYTES: u32 = 0;
 const DEFAULT_MAX_SIZE_TIME_NS: u64 = 500000000;
 const DEFAULT_GOP_SIZE: i32 = 30;
 const DEFAULT_KEYFRAME_PERIOD: u32 = 30;
-const DEFAULT_WATCHDOG_TIMEOUT_MS: i32 = 5000;
 
 pub type ParserFilter = (gstreamer::Element, Option<gstreamer::Element>);
 
@@ -114,12 +113,6 @@ impl DaemonCore {
                 gstreamer::PadProbeReturn::Ok
             });
         }
-
-        // decided to move all queus and watchdogs to top
-        let video_watchdog = gstreamer::ElementFactory::make("watchdog")
-            .property("timeout", DEFAULT_WATCHDOG_TIMEOUT_MS)
-            .name("video_watchdog")
-            .build()?;
 
         let video_queue_1 = gstreamer::ElementFactory::make("queue")
             .property("max-size-buffers", DEFAULT_MAX_SIZE_BUFFER)
@@ -229,7 +222,6 @@ impl DaemonCore {
                     vec![
                         video_pipewiresrc.clone(),
                         caps_filter_pipewiresrc,
-                        video_watchdog.clone(),
                         video_queue_1.clone(),
                         glupload,
                         caps_filter_glupload,
@@ -274,7 +266,6 @@ impl DaemonCore {
                     vec![
                         video_pipewiresrc.clone(),
                         caps_filter_pipewiresrc,
-                        video_watchdog.clone(),
                         video_queue_1.clone(),
                         vapostproc,
                     ],
@@ -327,7 +318,6 @@ impl DaemonCore {
                     vec![
                         video_pipewiresrc.clone(),
                         caps_filter_pipewiresrc,
-                        video_watchdog.clone(),
                         video_queue_1.clone(),
                         videoconvert,
                         videoscale,

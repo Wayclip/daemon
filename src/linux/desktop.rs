@@ -36,6 +36,8 @@ pub struct DesktopEnvironmentManager {
     pub daemon: Arc<Mutex<DaemonCore>>,
     pub desktop: DesktopEnvironmentType,
     pub trigger_combo: WayclipKeyCombo,
+    hotkey_manager: Option<GlobalHotKeyManager>,
+    registered_hotkey: Option<HotKey>,
 }
 
 impl DesktopEnvironmentManager {
@@ -49,6 +51,8 @@ impl DesktopEnvironmentManager {
             daemon,
             desktop,
             trigger_combo,
+            hotkey_manager: None,
+            registered_hotkey: None,
         })
     }
 
@@ -116,35 +120,56 @@ impl DesktopEnvironmentManager {
         Ok(format!("{process_string} daemon save"))
     }
 
-    pub fn remove_global_hotkey(&self) -> Result<(), WayclipError> {
-        let manager = GlobalHotKeyManager::new()?;
-        let hotkey = HotKey::new(
-            Some(self.trigger_combo.key_modifiers.clone().into()),
-            self.trigger_combo.key_code.clone().into(),
-        );
-
-        manager.unregister(hotkey)?;
+    pub fn remove_global_hotkey(&mut self) -> Result<(), WayclipError> {
+        if let (Some(manager), Some(hotkey)) =
+            (self.hotkey_manager.take(), self.registered_hotkey.take())
+            && let Err(e) = manager.unregister(hotkey)
+        {
+            log::error!("Failed to unregister hotkey: {e:?}");
+        }
 
         Ok(())
     }
 
-    pub fn setup_global_hotkey(&self) -> Result<(), WayclipError> {
-        let manager = GlobalHotKeyManager::new()?;
+    pub fn setup_global_hotkey(&mut self) -> Result<(), WayclipError> {
+        log::info!("Using wayclip_global_hotkey");
+
+        let (desktop, session) = Self::get_env_session()?;
+        if desktop == DesktopEnvironmentType::Gnome && session == SessionType::Wayland {
+            log::info!(
+                "GNOME Wayland detected, forcing GDK_BACKEND=x11 for global_hotkey fallback"
+            );
+            unsafe {
+                env::set_var("GDK_BACKEND", "x11");
+            }
+        }
+
+        let manager = match GlobalHotKeyManager::new() {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("Failed to initialize GlobalHotKeyManager (portal missing?): {e:?}");
+                return Ok(());
+            }
+        };
+
         let hotkey = HotKey::new(
             Some(self.trigger_combo.key_modifiers.clone().into()),
             self.trigger_combo.key_code.clone().into(),
         );
 
-        manager.register(hotkey)?;
+        if let Err(e) = manager.register(hotkey) {
+            log::error!("Failed to register global hotkey: {e:?}");
+            return Ok(());
+        }
 
         log::debug!("Registered a shortcut");
+        self.hotkey_manager = Some(manager);
+        self.registered_hotkey = Some(hotkey);
 
         let daemon_clone = self.daemon.clone();
 
         tokio::task::spawn_blocking(move || {
             // apparently to keep it alive and not drop it prematurely
-            let _manager = manager;
-
             while let Ok(event) = GlobalHotKeyEvent::receiver().recv() {
                 if event.id() == hotkey.id() && event.state() == HotKeyState::Released {
                     log::debug!("Hotkey triggered");
@@ -161,19 +186,20 @@ impl DesktopEnvironmentManager {
         Ok(())
     }
 
-    pub fn create_auto_bind(&self) -> Result<(), WayclipError> {
+    pub fn create_auto_bind(&mut self) -> Result<(), WayclipError> {
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
-                let bind_string = self.trigger_combo.clone().to_string().replace("+", ", ");
+                let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");
+                let trigger_cmd = self.get_trigger_command_string()?;
+
                 let full_string = format!(
-                    "{}, exec, {}",
-                    bind_string,
-                    self.get_trigger_command_string()?
+                    "hl.bind(\"{}\", hl.dsp.exec_cmd(\"{}\"))",
+                    bind_string, trigger_cmd
                 );
 
                 let mut cmd = Command::new("hyprctl");
-                cmd.arg("keyword").arg("bind").arg(&full_string);
-                Self::run_command(cmd, "hyprctl keyword bind")?;
+                cmd.arg("eval").arg(&full_string);
+                Self::run_command(cmd, "hyprctl eval")?;
             }
             DesktopEnvironmentType::Sway => {
                 let bind_string = self.trigger_combo.to_string();
@@ -186,6 +212,7 @@ impl DesktopEnvironmentManager {
                     .arg(&trigger_cmd);
                 Self::run_command(cmd, "swaymsg bindsym")?;
             }
+            //DesktopEnvironmentType::Hyprland
             DesktopEnvironmentType::Gnome | DesktopEnvironmentType::Kde => {
                 self.setup_global_hotkey()?
             }
@@ -199,14 +226,15 @@ impl DesktopEnvironmentManager {
         Ok(())
     }
 
-    pub fn remove_auto_bind(&self) -> Result<(), WayclipError> {
+    pub fn remove_auto_bind(&mut self) -> Result<(), WayclipError> {
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
-                let bind_string = self.trigger_combo.clone().to_string().replace("+", ", ");
+                let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");
+                let full_string = format!("hl.unbind(\"{}\")", bind_string);
 
                 let mut cmd = Command::new("hyprctl");
-                cmd.arg("keyword").arg("unbind").arg(&bind_string);
-                Self::run_command(cmd, "hyprctl keyword unbind")?;
+                cmd.arg("eval").arg(&full_string);
+                Self::run_command(cmd, "hyprctl eval unbind")?;
             }
             DesktopEnvironmentType::Sway => {
                 let bind_string = self.trigger_combo.to_string();
@@ -215,6 +243,7 @@ impl DesktopEnvironmentManager {
                 cmd.arg("unbindsym").arg(&bind_string);
                 Self::run_command(cmd, "swaymsg unbindsym")?;
             }
+            //DesktopEnvironmentType::Hyprland
             DesktopEnvironmentType::Gnome | DesktopEnvironmentType::Kde => {
                 self.remove_global_hotkey()?
             }

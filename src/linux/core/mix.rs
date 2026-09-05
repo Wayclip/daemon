@@ -20,6 +20,7 @@ impl DaemonCore {
     ) -> Result<(), WayclipError> {
         let ring_buffer_clone = self.ring_buffer.clone();
         let last_video_frame_time = self.last_video_frame_time.clone();
+        let last_audio_frame_time = self.last_audio_frame_time.clone();
         appsink.set_callbacks(
             gstreamer_app::AppSinkCallbacks::builder()
                 .new_sample(move |sink| {
@@ -61,6 +62,12 @@ impl DaemonCore {
                                     pts = ClockTime::from_nseconds(shifted.max(0) as u64);
                                 }
                                 ContentType::Audio => {
+                                    let now_ms = SystemTime::now()
+                                        .duration_since(UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as u64;
+                                    last_audio_frame_time.store(now_ms, Ordering::Release);
+
                                     if ring_buffer.awaiting_audio_resync {
                                         if let Some(reference) = ring_buffer.audio_resync_reference {
                                             let gap = ClockTime::from_mseconds(20);

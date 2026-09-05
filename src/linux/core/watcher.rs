@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use wayclip_core::models::error::WayclipError;
 
 const PIPELINE_STALL_S: u64 = 10;
+const AUDIO_SILENCE_LOG_S: u64 = 10;
 
 impl DaemonCore {
     pub fn spawn_discovery_update(
@@ -50,6 +51,8 @@ impl DaemonCore {
         pipeline: &gstreamer::Pipeline,
         generation: Arc<AtomicU64>,
         last_video_frame_time: Arc<AtomicU64>,
+        last_audio_frame_time: Arc<AtomicU64>,
+        audio_expected: bool,
         my_generation: u64,
         cancel_token: CancellationToken,
         shutdown_sender: mpsc::Sender<ShutdownReason>,
@@ -78,16 +81,10 @@ impl DaemonCore {
                             let msg = format!("{} ({:?})", e.error(), e.debug());
                             error!("Capture pipeline error: {msg}");
 
-                            // format regonitiation error (idk why it happens)
-                            let recoverable = msg.contains("unhandled format")
-                                || msg.contains("pipewiresrc")
-                                || msg.contains("negotiation")
-                                || msg.contains("not-negotiated")
-                                || msg.contains("stream error")
-                                || msg.contains("No data received")
-                                || msg.contains("on_state_changed")
-                                || e.error().is::<gstreamer::StreamError>()
-                                || e.error().is::<gstreamer::ResourceError>();
+                            let recoverable = msg.contains("not-negotiated")
+                                || msg.contains("unhandled format")
+                                || msg.contains("renegotiation")
+                                || msg.contains("no more input formats");
 
                             if recoverable {
                                 log::warn!("Recoverable error recieved, attempting to restart");
@@ -151,19 +148,36 @@ impl DaemonCore {
                         .unwrap_or_default()
                         .as_millis() as u64;
 
-                    let last_frame = last_video_frame_time.load(Ordering::Acquire);
-                    let startup_stall = last_frame == 0 && (now_ms - start_time_ms > 5000);
+                    let last_video_frame = last_video_frame_time.load(Ordering::Acquire);
+                    let video_startup_stall =
+                        last_video_frame == 0 && (now_ms - start_time_ms > 5000);
+                    let video_runtime_stall = last_video_frame > 0
+                        && (now_ms.saturating_sub(last_video_frame) > PIPELINE_STALL_S * 1000);
 
-                    let runtime_stall = last_frame > 0
-                        && (now_ms.saturating_sub(last_frame) > PIPELINE_STALL_S * 1000);
+                    let video_stalled = video_startup_stall || video_runtime_stall;
 
-                    if startup_stall || runtime_stall {
+                    if audio_expected {
+                        let last_audio_frame = last_audio_frame_time.load(Ordering::Acquire);
+                        let audio_quiet = (last_audio_frame == 0
+                            && (now_ms - start_time_ms > AUDIO_SILENCE_LOG_S * 1000))
+                            || (last_audio_frame > 0
+                                && (now_ms.saturating_sub(last_audio_frame)
+                                    > AUDIO_SILENCE_LOG_S * 1000));
+
+                        if audio_quiet {
+                            log::debug!(
+                                "No audio frames for over {AUDIO_SILENCE_LOG_S}s (this is not treated as an error)"
+                            );
+                        }
+                    }
+
+                    if video_stalled {
                         log::warn!(
                             "Video stream stall detected (no frames for {}ms). Triggering recovery...",
-                            if last_frame == 0 {
+                            if last_video_frame == 0 {
                                 now_ms - start_time_ms
                             } else {
-                                now_ms - last_frame
+                                now_ms - last_video_frame
                             }
                         );
 
@@ -205,16 +219,28 @@ impl DaemonCore {
         cancel_token: CancellationToken,
         shutdown_sender: mpsc::Sender<ShutdownReason>,
     ) -> Result<(), WayclipError> {
-        let (config, old_pipeline, generation, next_gen, last_video_frame_time) = {
+        let (
+            config,
+            old_pipeline,
+            generation,
+            next_gen,
+            last_video_frame_time,
+            last_audio_frame_time,
+            audio_expected,
+        ) = {
             let core = daemon_arc.lock().await;
             let next_gen = core.generation.fetch_add(1, Ordering::SeqCst) + 1;
             core.last_video_frame_time.store(0, Ordering::Release);
+            core.last_audio_frame_time.store(0, Ordering::Release);
             (
                 core.recording_config.clone(),
                 core.gstreamer_pipeline.clone(),
                 core.generation.clone(),
                 next_gen,
                 core.last_video_frame_time.clone(),
+                core.last_audio_frame_time.clone(),
+                core.recording_config.audio.microphone.enabled
+                    || core.recording_config.audio.background.enabled,
             )
         };
 
@@ -285,6 +311,8 @@ impl DaemonCore {
             &new_pipeline,
             generation,
             last_video_frame_time,
+            last_audio_frame_time,
+            audio_expected,
             next_gen,
             cancel_token,
             shutdown_sender.clone(),
