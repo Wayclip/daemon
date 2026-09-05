@@ -8,7 +8,10 @@ use crate::linux::pipewire::PipewireManager;
 use ashpd::desktop::Session;
 use ashpd::desktop::screencast::Screencast;
 use gstreamer::ClockTime;
+use gstreamer::glib::object::Cast;
 use gstreamer::prelude::ElementExt;
+use gstreamer_gl::GLDisplay;
+use gstreamer_gl::prelude::ContextGLExt;
 use nanoid::nanoid;
 use sd_notify::NotifyState;
 use std::os::fd::OwnedFd;
@@ -59,6 +62,7 @@ pub struct DaemonCore {
     discord: Option<DiscordPresenceManager>,
     recording_config: RecordingConfig,
     output_config: OutputSettings,
+    gl_display: GLDisplay,
 }
 
 impl DaemonCore {
@@ -146,6 +150,26 @@ impl DaemonCore {
         };
 
         let pipeline = gstreamer::Pipeline::new();
+
+        let gl_display = daemon_arc.lock().await.gl_display.clone();
+        let bus = pipeline
+            .bus()
+            .ok_or_else(|| WayclipError::Validation("No bus found".into()))?;
+        bus.set_sync_handler(move |_, msg| {
+            if let gstreamer::MessageView::NeedContext(ctxt) = msg.view()
+                && ctxt.context_type() == *gstreamer_gl::GL_DISPLAY_CONTEXT_TYPE
+                && let Some(src) = msg
+                    .src()
+                    .and_then(|s| s.downcast_ref::<gstreamer::Element>())
+            {
+                let mut context = gstreamer::Context::new(ctxt.context_type(), true);
+                context.get_mut().unwrap().set_gl_display(&gl_display);
+                src.set_context(&context);
+            }
+
+            gstreamer::BusSyncReply::Pass
+        });
+
         {
             let mut daemon = daemon_arc.lock().await;
             daemon.pipewire_session = Some(screencast.pipewire_session);
@@ -250,6 +274,10 @@ impl DaemonCore {
         output_config: OutputSettings,
         discord_rich_presence: bool,
     ) -> Result<Self, WayclipError> {
+        gstreamer::init()?;
+
+        let gl_display = gstreamer_gl_egl::GLDisplayEGL::new()?.upcast::<gstreamer_gl::GLDisplay>();
+
         Ok(Self {
             id: nanoid!(),
             discovery: Discovery::new()?,
@@ -275,6 +303,7 @@ impl DaemonCore {
             } else {
                 None
             },
+            gl_display,
         })
     }
 }
