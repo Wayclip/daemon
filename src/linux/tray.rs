@@ -235,19 +235,6 @@ impl ksni::Tray for WayclipTray {
                 ..Default::default()
             }
             .into(),
-            // StandardItem {
-            //     label: format!(
-            //         "RAM: {}",
-            //         self.stats
-            //             .as_ref()
-            //             .map(|s| s.ram.clone())
-            //             .unwrap_or_default()
-            //     ),
-            //     visible: self.stats.is_some(),
-            //     enabled: false,
-            //     ..Default::default()
-            // }
-            // .into(),
         ]
     }
 }

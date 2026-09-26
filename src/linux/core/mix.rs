@@ -1,4 +1,4 @@
-use crate::common::ring::{ContentType, EncodedFrame};
+use crate::common::video::ring::data::{ContentType, EncodedFrame};
 use crate::linux::core::{
     DEFAULT_APPSINK_DROP, DEFAULT_APPSINK_MAX_BUFFERS, DEFAULT_APPSINK_SYNC,
     DEFAULT_AUDIO_CHANNELS, DaemonCore,
@@ -101,23 +101,6 @@ impl DaemonCore {
                                 ring_buffer.audio_first_pts = Some(pts);
                                 ring_buffer.audio_start_instant = Some(Instant::now());
                                 log::debug!("First Audio PTS Recieved: {}ms", pts.mseconds());
-                            }
-
-                            #[cfg(debug_assertions)]
-                            {
-                                let limiter = match content_type {
-                                    ContentType::Video => &mut ring_buffer.arriving_video_limiter,
-                                    ContentType::Audio => &mut ring_buffer.arriving_audio_limiter,
-                                };
-
-                                if limiter.allow() {
-                                    log::trace!(
-                                        "{} PTS Arriving: {}ms ({} log/s)",
-                                        content_type,
-                                        pts.mseconds(),
-                                        limiter.interval.as_secs()
-                                    );
-                                }
                             }
 
                             let dts = buffer_ref.dts();
