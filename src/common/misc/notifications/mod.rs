@@ -9,10 +9,6 @@ pub mod sound;
 
 pub struct NotificationManager;
 
-//pub const DBUS_NOTIFICATION_DESTINATION: &str = "org.freedesktop.Notifications";
-//pub const DBUS_NOTIFICATION_PATH: &str = "/org/freedesktop/Notifications";
-//static DBUS_CONNECTION: OnceLock<Connection> = OnceLock::new();
-
 #[derive(Debug, Clone)]
 pub enum NotificationEvent {
     SaveSuccess,
@@ -141,37 +137,6 @@ impl NotificationManager {
             .timeout(notify_rust::Timeout::Milliseconds(timeout_ms as u32))
             .show()
             .map_err(|e| WayclipError::Validation(e.to_string().into()))?;
-
-        //let conn = if let Some(conn) = DBUS_CONNECTION.get() {
-        //    conn
-        //} else {
-        //    let conn = Connection::session()?;
-        //    DBUS_CONNECTION.set(conn).ok();
-        //    DBUS_CONNECTION.get().ok_or_else(|| {
-        //        WayclipError::Validation("Failed to initialize D-Bus connection".into())
-        //    })?
-        //};
-
-        //let mut hints: HashMap<&str, Value> = HashMap::new();
-        //hints.insert("urgency", Value::U8(urgency as u8));
-
-        //// https://specifications.freedesktop.org/notification-spec/latest/
-        //conn.call_method(
-        //    Some(DBUS_NOTIFICATION_DESTINATION),
-        //    DBUS_NOTIFICATION_PATH,
-        //    Some(DBUS_NOTIFICATION_DESTINATION),
-        //    "Notify",
-        //    &(
-        //        "Wayclip",
-        //        0u32, // make new notif
-        //        icon,
-        //        summary,
-        //        body.as_str(),
-        //        Vec::<&str>::new(), // empty actions
-        //        hints,
-        //        timeout_ms,
-        //    ),
-        //)?;
 
         Ok(())
     }
