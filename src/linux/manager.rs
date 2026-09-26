@@ -86,6 +86,7 @@ impl DaemonManager {
     }
 
     pub async fn initialise_daemon(settings: UserSettings) -> Result<(), WayclipError> {
+        wayclip_core::set_locale(&settings.output.language.to_string());
         log::debug!("Settings: {:?}", settings);
 
         let shortcut_string = settings.shortcuts.save_clip.to_string();
@@ -104,7 +105,7 @@ impl DaemonManager {
             settings.notification.clone(),
             recording_config.clone(),
             settings.output.clone(),
-            settings.game_discovery.discord_rich_presence,
+            //settings.game_discovery.discord_rich_presence,
         )?));
 
         // Yes we drop & rely on the pending await.
@@ -173,9 +174,17 @@ impl DaemonManager {
         let mut exit_code = 0;
 
         tokio::select! {
-            _ = sigint.recv() => info!("SIGINT (Ctrl+C) received, shutting down..."),
-            _ = sigterm.recv() => info!("SIGTERM received, shutting down..."),
+            _ = sigint.recv() => {
+                // To commit that debug message
+                eprintln!();
+                info!("SIGINT (Ctrl+C) received, shutting down...");
+            }
+            _ = sigterm.recv() => {
+                eprintln!();
+                info!("SIGTERM received, shutting down...");
+            }
             reason = shutdown_reciever.recv() => {
+                eprintln!();
                 match reason {
                     Some(ShutdownReason::TrayExit) => {
                         info!("Tray exit");
@@ -191,7 +200,6 @@ impl DaemonManager {
                     }
                 }
             }
-            //_ = sighup.recv() => info!("SIGHUP received, shutting down..."),
         }
 
         cancel_token.cancel();
@@ -205,6 +213,7 @@ impl DaemonManager {
         if let Err(e) = daemon.shutdown().await {
             log::error!("Error during graceful shutdown: {e:?}");
         }
+        eprint!("\r\x1b[2K");
 
         exit(exit_code);
     }

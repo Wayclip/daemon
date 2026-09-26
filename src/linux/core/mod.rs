@@ -1,7 +1,6 @@
 use crate::ShutdownReason;
-use crate::common::discord::DiscordPresenceManager;
-use crate::common::notifications::{NotificationEvent, NotificationManager};
-use crate::common::ring::RingBuffer;
+use crate::common::misc::notifications::{NotificationEvent, NotificationManager};
+use crate::common::video::ring::RingBuffer;
 use crate::linux::core::types::{DaemonStatus, DefaultDeviceType, RecordingConfig};
 use crate::linux::discovery::Discovery;
 use crate::linux::pipewire::PipewireManager;
@@ -59,7 +58,7 @@ pub struct DaemonCore {
     pipewire_session: Option<Session<Screencast>>,
     pipewire_file_descriptor: Option<OwnedFd>,
     pipewire_node_id: Option<String>,
-    discord: Option<DiscordPresenceManager>,
+    //discord: Option<>,
     recording_config: RecordingConfig,
     output_config: OutputSettings,
     gl_display: GLDisplay,
@@ -272,7 +271,7 @@ impl DaemonCore {
         notification_settings: NotificationSettings,
         recording_config: RecordingConfig,
         output_config: OutputSettings,
-        discord_rich_presence: bool,
+        //discord_rich_presence: bool,
     ) -> Result<Self, WayclipError> {
         gstreamer::init()?;
 
@@ -298,11 +297,11 @@ impl DaemonCore {
             notification_settings,
             recording_config,
             output_config,
-            discord: if discord_rich_presence {
-                Some(DiscordPresenceManager::new())
-            } else {
-                None
-            },
+            //discord: if discord_rich_presence {
+            //    Some(DiscordPresenceManager::new())
+            //} else {
+            //    None
+            //},
             gl_display,
         })
     }

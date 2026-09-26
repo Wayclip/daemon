@@ -35,9 +35,9 @@ impl DaemonCore {
                         lock.discovery.discover_game();
                         let game_name = lock.discovery.confident_game().map(|g| g.to_string());
                         log::debug!("(discord) confident game: {game_name:?}");
-                        if let Some(discord) = &lock.discord {
-                            discord.set_recording(game_name);
-                        }
+                        //if let Some(discord) = &lock.discord {
+                        //    discord.set_recording(game_name);
+                        //}
                     }
                 }
             }

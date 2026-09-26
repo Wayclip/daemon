@@ -1,4 +1,4 @@
-use crate::common::ring::ContentType;
+use crate::common::video::ring::data::ContentType;
 use crate::linux::core::{
     DEFAULT_APPSINK_DROP, DEFAULT_APPSINK_MAX_BUFFERS, DEFAULT_APPSINK_SYNC,
     DEFAULT_PIPEWIRE_DO_TIMESTAMP, DaemonCore,
@@ -115,17 +115,17 @@ impl DaemonCore {
         }
 
         let video_queue_1 = gstreamer::ElementFactory::make("queue")
-            .property("max-size-buffers", DEFAULT_MAX_SIZE_BUFFER)
-            .property("max-size-bytes", DEFAULT_MAX_SIZE_BYTES)
-            .property("max-size-time", DEFAULT_MAX_SIZE_TIME_NS)
+            .property("max-size-buffers", 30u32)
+            .property("max-size-bytes", 64u32 * 1024u32 * 1024u32)
+            .property("max-size-time", 250_000_000u64)
             .property_from_str("leaky", DEFAULT_GST_LEAKY_DOWNSTREAM)
             .name("video_queue_1")
             .build()?;
 
         let video_queue_2 = gstreamer::ElementFactory::make("queue")
-            .property("max-size-buffers", DEFAULT_MAX_SIZE_BUFFER)
-            .property("max-size-bytes", DEFAULT_MAX_SIZE_BYTES)
-            .property("max-size-time", DEFAULT_MAX_SIZE_TIME_NS)
+            .property("max-size-buffers", 30u32)
+            .property("max-size-bytes", 64u32 * 1024u32 * 1024u32)
+            .property("max-size-time", 250_000_000u64)
             .property_from_str("leaky", DEFAULT_GST_LEAKY_DOWNSTREAM)
             .name("video_queue_2")
             .build()?;

@@ -1,5 +1,6 @@
-use crate::common::notifications::{NotificationEvent, NotificationManager};
-use crate::common::remux::RemuxHandler;
+use crate::common::misc::notifications::{NotificationEvent, NotificationManager};
+use crate::common::video::SaveManager;
+use crate::common::video::preview::PreviewManager;
 use crate::linux::core::DaemonCore;
 use crate::linux::core::types::DaemonStatus;
 use chrono::Local;
@@ -124,12 +125,12 @@ impl DaemonCore {
         let video_bytes = saved_data
             .video_frames
             .iter()
-            .map(|f| f.data.size() as u64)
+            .map(|f| f.payload.size() as u64)
             .sum::<u64>();
         let audio_bytes = saved_data
             .audio_frames
             .iter()
-            .map(|f| f.data.size() as u64)
+            .map(|f| f.payload.size() as u64)
             .sum::<u64>();
 
         // add 1.5%
@@ -230,17 +231,12 @@ impl DaemonCore {
         // Yes okay i have a stroke reading this aswell
         let handle = tokio::task::spawn_blocking(move || -> Result<(), WayclipError> {
             // Apparently if ur using ::default, you may not even initialise it.
-            RemuxHandler.run_remux_pipeline(
-                saved_data,
-                format_for_remux,
-                clip_path_for_remux.clone(),
-            )?;
+            SaveManager::save_clip(saved_data, format_for_remux, &clip_path_for_remux)?;
 
             std::thread::spawn(move || {
-                match RemuxHandler.generate_preview(
-                    clip_path_for_remux,
-                    preview_path_for_remux,
-                    first_video_pts,
+                match PreviewManager::generate_preview(
+                    clip_path_for_remux.as_ref(),
+                    preview_path_for_remux.as_ref(),
                 ) {
                     Err(e) => error!("Could not generate preview {e}"),
                     Ok(_) => info!("Preview successfully generated"),
