@@ -6,6 +6,7 @@ use crate::linux::core::types::RecordingConfig;
 use crate::linux::desktop::DesktopEnvironmentManager;
 use crate::linux::tray::WayclipTray;
 use log::info;
+use std::io::IsTerminal;
 use std::process::exit;
 use std::sync::Arc;
 use tokio::signal::unix::SignalKind;
@@ -213,7 +214,9 @@ impl DaemonManager {
         if let Err(e) = daemon.shutdown().await {
             log::error!("Error during graceful shutdown: {e:?}");
         }
-        eprint!("\r\x1b[2K");
+        if !std::io::stderr().is_terminal() {
+            eprint!("\r\x1b[2K");
+        }
 
         exit(exit_code);
     }

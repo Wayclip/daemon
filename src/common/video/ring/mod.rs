@@ -1,6 +1,10 @@
 use crate::common::video::ring::data::{EncodedFrame, SaveData};
 use gstreamer::ClockTime;
-use std::{collections::VecDeque, time::Instant};
+use std::{
+    collections::VecDeque,
+    io::{self, IsTerminal},
+    time::Instant,
+};
 use wayclip_core::models::error::WayclipError;
 
 pub mod data;
@@ -80,6 +84,10 @@ impl RingBuffer {
 
     // We can use terminal technique to always print to same line
     fn debug_line(&self, frame: &EncodedFrame) {
+        if !io::stderr().is_terminal() {
+            return;
+        }
+
         // Get resolution string
         let res = self.resolution_str();
         // Calculate the total ring buffer size in MB
