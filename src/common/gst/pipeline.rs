@@ -24,7 +24,7 @@ impl GStreamerPipeline {
         }
     }
 
-    pub fn get_state(&self, timeout: Option<ClockTime>) -> Result<GetStateResult, WayclipError> {
+    pub fn _get_state(&self, timeout: Option<ClockTime>) -> Result<GetStateResult, WayclipError> {
         let (res, current, pending) = self.pipeline.state(timeout);
         let success = res?;
         Ok(GetStateResult {
@@ -34,12 +34,12 @@ impl GStreamerPipeline {
         })
     }
 
-    pub fn set_state(self, state: gstreamer::State) -> Result<Self, WayclipError> {
+    pub fn set_state(&self, state: gstreamer::State) -> Result<(), WayclipError> {
         self.pipeline.set_state(state)?;
-        Ok(self)
+        Ok(())
     }
 
-    pub fn add(self, element: &impl IsA<Element>) -> Result<Self, WayclipError> {
+    pub fn _add(self, element: &impl IsA<Element>) -> Result<Self, WayclipError> {
         self.pipeline.add(element.upcast_ref())?;
         Ok(self)
     }

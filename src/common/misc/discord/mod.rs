@@ -1,5 +1,6 @@
-use crate::common::misc::discord::custom::{
-    CurrentSession, CustomDiscordPresenceManager, LastClipInfo, UserSessionInfo,
+use crate::{
+    common::misc::discord::custom::CustomDiscordPresenceManager,
+    linux::core::session::{CurrentSession, LastClipInfo},
 };
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
@@ -18,7 +19,7 @@ enum PresenceCommand {
 }
 
 #[derive(Clone)]
-enum DiscordPresenceState {
+pub enum DiscordPresenceState {
     Custom(CustomDiscordPresenceManager),
     Default,
 }

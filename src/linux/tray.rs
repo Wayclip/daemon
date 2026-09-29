@@ -1,15 +1,11 @@
-use crate::ShutdownReason;
-use crate::linux::core::DaemonCore;
-use crate::linux::core::types::DaemonStatus;
+use crate::linux::core::ipc::commands::IpcCommand;
 use crate::linux::manager::DaemonManager;
 use ksni::MenuItem;
 use ksni::TrayMethods;
 use ksni::menu::StandardItem;
-use std::sync::Arc;
 use sysinfo::Pid;
 use sysinfo::System;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::tray::TraySettings;
@@ -35,94 +31,99 @@ pub struct TrayStats {
 
 #[derive(Clone)]
 pub struct WayclipTray {
-    pub daemon: Arc<Mutex<DaemonCore>>,
+    command_sender: mpsc::Sender<IpcCommand>,
     // we will update this using our handler
     pub stats: Option<TrayStats>,
     pub config: TraySettings,
     pub cancel_token: CancellationToken,
-    pub shutdown_sender: mpsc::Sender<ShutdownReason>,
 }
 
 impl WayclipTray {
-    pub async fn run_tray(
-        daemon: Arc<Mutex<DaemonCore>>,
+    pub fn run_tray(
+        command_sender: mpsc::Sender<IpcCommand>,
         config: TraySettings,
         cancel_token: CancellationToken,
-        shutdown_sender: mpsc::Sender<ShutdownReason>,
-    ) -> Result<(), WayclipError> {
+    ) {
         if !config.enabled {
-            return Ok(());
+            return;
         }
 
-        // create tray
-        let tray = Self {
-            daemon: daemon.clone(),
-            stats: None,
-            config,
-            cancel_token: cancel_token.clone(),
-            shutdown_sender,
-        };
-        let poll = tray.config.show_stats || tray.config.show_status;
+        tokio::spawn(async move {
+            let cmd_sender = command_sender.clone();
 
-        // spawn handler, so we can also then edit it on the fly
-        let handle = tray
-            .spawn()
-            .await
-            .map_err(|e| WayclipError::Tray(e.to_string().into()))?;
+            // create tray
+            let tray = Self {
+                command_sender,
+                stats: None,
+                config,
+                cancel_token: cancel_token.clone(),
+            };
+            let poll = tray.config.show_stats || tray.config.show_status;
 
-        log::info!("Tray registered successfully");
-
-        if poll {
-            // collect system info
-            let mut sys = System::new_all();
-            let pid = Pid::from(std::process::id() as usize);
-
-            loop {
-                tokio::select! {
-                     _ = cancel_token.cancelled() => {
-                         log::debug!("Tray polling loop shutting down");
-                         break;
-                     }
-                     _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
-                         // inf loop, update info on a specific pid
-                         sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-
-                         let (status, cpu, ram) = {
-                             let core = daemon.lock().await;
-                             // get status
-                             let status = format!(
-                                 "{:?}",
-                                 core.get_status().await.unwrap_or(DaemonStatus::Inactive)
-                             );
-
-                             // get cpu & mem for a process
-                             let mut cpu = 0.0;
-                             let mut mem = 0.0;
-                             if let Some(proc) = sys.process(pid) {
-                                 // yes, its between 0-100. meaning across all cores
-                                 cpu = proc.cpu_usage() / sys.cpus().len() as f32;
-                                 // 1000, not 1024 since MB not MiB
-                                 mem = proc.memory() as f64 / 1000.0 / 1000.0;
-                             }
-
-                             (status, format!("{:.1}%", cpu), format!("{:.1} MB", mem))
-                         };
-
-                         // and then use that data to actually update tray info
-                         handle
-                             .update(move |t: &mut WayclipTray| {
-                                 let stats = TrayStats { status, cpu, ram };
-                                 t.stats = Some(stats);
-                             })
-                             .await;
-                     }
+            // spawn handler, so we can also then edit it on the fly
+            let handle = match tray.spawn().await {
+                Ok(handle) => handle,
+                Err(e) => {
+                    log::error!("Failed to register tray: {e}");
+                    return;
                 }
-            }
-        } else {
-            cancel_token.cancelled().await;
-        }
+            };
 
-        Ok(())
+            log::info!("Tray registered successfully");
+
+            if poll {
+                // collect system info
+                let mut sys = System::new_all();
+                let pid = Pid::from(std::process::id() as usize);
+
+                loop {
+                    tokio::select! {
+                         _ = cancel_token.cancelled() => {
+                             log::debug!("Tray polling loop shutting down");
+                             break;
+                         }
+                         _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                             // inf loop, update info on a specific pid
+                             sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+
+                             let (status, cpu, ram) = {
+                                 let (tx, rx) = oneshot::channel();
+                                 let status = if cmd_sender.send(IpcCommand::GetStatus { responder: tx }).await.is_ok() {
+                                     match rx.await {
+                                         Ok(st) => format!("{st:?}"),
+                                         Err(_) => "Unknown".into(),
+                                     }
+                                 } else {
+                                     "Offline".into()
+                                 };
+
+                                 // get cpu & mem for a process
+                                 let mut cpu = 0.0;
+                                 let mut mem = 0.0;
+                                 if let Some(proc) = sys.process(pid) {
+                                     // yes, its between 0-100. meaning across all cores
+                                     cpu = proc.cpu_usage() / sys.cpus().len() as f32;
+                                     // 1000, not 1024 since MB not MiB
+                                     mem = proc.memory() as f64 / 1000.0 / 1000.0;
+                                 }
+
+                                 (status, format!("{:.1}%", cpu), format!("{:.1} MB", mem))
+                             };
+
+                             // and then use that data to actually update tray info
+                             handle
+                                 .update(move |t: &mut WayclipTray| {
+                                     let stats = TrayStats { status, cpu, ram };
+                                     t.stats = Some(stats);
+                                 })
+                                 .await;
+                         }
+                    }
+                }
+            } else {
+                cancel_token.cancelled().await;
+            }
+        });
     }
 
     pub fn get_png(&self) -> Vec<u8> {
@@ -146,7 +147,7 @@ impl ksni::Tray for WayclipTray {
 
     // all of our menu actions
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        let daemon_for_save = self.daemon.clone();
+        let cmd_sender_for_save = self.command_sender.clone();
 
         vec![
             // main title
@@ -163,10 +164,21 @@ impl ksni::Tray for WayclipTray {
             StandardItem {
                 label: "Save Clip".into(),
                 activate: Box::new(move |_| {
-                    // yes i agree ugly ahh code, but whatever
-                    let core = daemon_for_save.clone();
+                    let sender = cmd_sender_for_save.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = DaemonCore::save_clip(core, None).await {
+                        let (tx, rx) = oneshot::channel();
+                        if let Err(e) = sender
+                            .send(IpcCommand::SaveClip {
+                                custom_name: None,
+                                responder: tx,
+                            })
+                            .await
+                        {
+                            log::error!("Tray failed to trigger save: {e}");
+                            return;
+                        }
+
+                        if let Ok(Err(e)) = rx.await {
                             log::error!("Tray failed to trigger save: {e}");
                         }
                     });
@@ -189,14 +201,9 @@ impl ksni::Tray for WayclipTray {
             }
             .into(),
             StandardItem {
-                label: "Exit Tray & Daemon".into(),
+                label: "Exit Wayclip".into(),
                 activate: Box::new(|this: &mut Self| {
-                    let token = this.cancel_token.clone();
-                    let sender = this.shutdown_sender.clone();
-                    tokio::spawn(async move {
-                        let _ = sender.send(ShutdownReason::TrayExit).await;
-                        token.cancel();
-                    });
+                    this.cancel_token.cancel();
                 }),
                 visible: self.config.show_exit,
                 ..Default::default()

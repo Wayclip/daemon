@@ -84,14 +84,14 @@ impl NotificationManager {
         Ok(())
     }
 
-    pub fn process_event(
+    pub fn send_event(
         event: NotificationEvent,
-        settings: NotificationSettings,
+        settings: &NotificationSettings,
         content: String,
     ) -> Result<(), WayclipError> {
         log::info!("Notification Event Triggered: {:?}", event);
-        NotificationSound::process_audio_event(&event, &settings);
-        NotificationManager::process_message_event(&event, &settings, content);
+        NotificationSound::process_audio_event(&event, settings);
+        NotificationManager::process_message_event(&event, settings, content);
 
         Ok(())
     }
