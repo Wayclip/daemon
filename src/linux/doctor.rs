@@ -1,6 +1,6 @@
 use crate::{
     common::misc::notifications::{NotificationEvent, NotificationManager},
-    linux::{core::DEFAULT_PIPEWIRE_TIMEOUT, pipewire::PipewireManager},
+    linux::pipewire::PipewireManager,
 };
 use ashpd::desktop::screencast::Screencast;
 use serde::{Deserialize, Serialize};

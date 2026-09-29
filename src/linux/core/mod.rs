@@ -1,308 +1,227 @@
-use crate::ShutdownReason;
-use crate::common::misc::notifications::{NotificationEvent, NotificationManager};
-use crate::common::video::ring::RingBuffer;
-use crate::linux::core::types::{DaemonStatus, DefaultDeviceType, RecordingConfig};
-use crate::linux::discovery::Discovery;
-use crate::linux::pipewire::PipewireManager;
-use ashpd::desktop::Session;
-use ashpd::desktop::screencast::Screencast;
-use gstreamer::ClockTime;
-use gstreamer::glib::object::Cast;
-use gstreamer::prelude::ElementExt;
-use gstreamer_gl::GLDisplay;
-use gstreamer_gl::prelude::ContextGLExt;
-use nanoid::nanoid;
+use std::{io::IsTerminal, process::exit, time::Duration};
+
 use sd_notify::NotifyState;
-use std::os::fd::OwnedFd;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::{
+    signal::unix::{self, SignalKind},
+    time::interval,
+};
 use tokio_util::sync::CancellationToken;
-use wayclip_core::models::error::WayclipError;
-use wayclip_core::settings::discovery::GameDiscovery;
-use wayclip_core::settings::notifications::NotificationSettings;
-use wayclip_core::settings::output::OutputSettings;
+use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 
-pub(crate) mod actions;
-pub(crate) mod audio;
-pub(crate) mod mix;
-pub(crate) mod screencast;
-pub(crate) mod server;
-pub(crate) mod types;
-pub(crate) mod video;
-pub(crate) mod watcher;
+use crate::{
+    common::misc::notifications::{NotificationEvent, NotificationManager},
+    linux::{
+        controller::ControllerManager,
+        core::{
+            engine::DaemonEngine,
+            ipc::{DaemonIpc, commands::IpcCommand},
+            services::DaemonServices,
+            session::CurrentSession,
+        },
+        core1::types::DaemonStatus,
+        desktop::DesktopEnvironmentManager,
+        tray::WayclipTray,
+    },
+};
 
-// const DEFAULT_ALLOW_MULTIPLE: bool = false;
-// Yes this is a hack i found online
-// changed it ACTUALLY be downstream now
-pub(crate) const DEFAULT_APPSINK_MAX_BUFFERS: u32 = 100;
-pub(crate) const DEFAULT_APPSINK_DROP: bool = false;
-pub(crate) const DEFAULT_APPSINK_SYNC: bool = false;
-pub(crate) const DEFAULT_PIPEWIRE_DO_TIMESTAMP: bool = true;
-pub(crate) const DEFAULT_AUDIO_CHANNELS: i32 = 2;
-pub(crate) const DEFAULT_PIPEWIRE_TIMEOUT: u64 = 4;
+pub mod engine;
+pub mod ipc;
+pub mod services;
+pub mod session;
 
+/// The DaemonCore will act as the central orchistrator for the whole of daemon
 pub struct DaemonCore {
+    /// The ID is used to compare generations, or instances of the Daemon
     id: String,
-    generation: Arc<AtomicU64>,
-    pub(crate) last_video_frame_time: Arc<AtomicU64>,
-    pub(crate) last_audio_frame_time: Arc<AtomicU64>,
+    /// Status will be updated as the process goes through its life cycle
     status: DaemonStatus,
-    discovery: Discovery,
-    ring_buffer: Arc<Mutex<RingBuffer>>,
-    notification_settings: NotificationSettings,
-    restore_token: Option<String>,
-    pipewire_manager: PipewireManager,
-    gstreamer_pipeline: Option<gstreamer::Pipeline>,
-    pipewire_proxy: Option<Screencast>,
-    pipewire_session: Option<Session<Screencast>>,
-    pipewire_file_descriptor: Option<OwnedFd>,
-    pipewire_node_id: Option<String>,
-    //discord: Option<>,
-    recording_config: RecordingConfig,
-    output_config: OutputSettings,
-    gl_display: GLDisplay,
+    /// The engine is the main driver in the daemon, handing connections, recording & frame storing
+    engine: DaemonEngine,
+    /// Services will contain all the additional servies and methods that are run in between
+    /// capturing frames, like sending discord status, or detecting game
+    services: DaemonServices,
+    /// IPC module responsible for communications
+    ipc: DaemonIpc,
+    /// Current Session stores dat about the current recording session, like the user, clip count &
+    /// more
+    current_session: CurrentSession,
 }
 
 impl DaemonCore {
-    pub async fn init(
-        daemon_arc: Arc<tokio::sync::Mutex<Self>>,
-        config: RecordingConfig,
-        discovery: GameDiscovery,
-        cancel_token: CancellationToken,
-        shutdown_sender: mpsc::Sender<ShutdownReason>,
-    ) -> Result<(), WayclipError> {
-        {
-            let mut daemon = daemon_arc.lock().await;
-            NotificationManager::process_event(
-                NotificationEvent::DaemonStart,
-                daemon.notification_settings.clone(),
-                String::default(),
-            )?;
-            daemon.status = DaemonStatus::Activating;
-        }
+    pub fn new() -> Result<Self, WayclipError> {
+        // Since the daemon will be standalone, this will be the 'entrypoint', meaning we will have
+        // to pull fresh settings, set locale & more
+        let user_settings = UserSettings::load()?;
+        wayclip_core::set_locale(&user_settings.output.language.to_string());
 
-        gstreamer::init()?;
+        Ok(Self {
+            id: nanoid::nanoid!(),
+            status: DaemonStatus::Inactive,
+            engine: DaemonEngine::new(user_settings.recording.video.get_max_duration())?,
+            services: DaemonServices::new(&user_settings)?,
+            ipc: DaemonIpc::new()?,
+            current_session: CurrentSession::new(user_settings, None),
+        })
+    }
 
-        let pipeline = Self::build_full_pipeline(daemon_arc.clone(), config).await?;
-
-        let (generation, current_gen, last_video_frame_time, last_audio_frame_time, audio_expected) = {
-            let daemon = daemon_arc.lock().await;
-            (
-                daemon.generation.clone(),
-                daemon.generation.load(Ordering::Acquire),
-                daemon.last_video_frame_time.clone(),
-                daemon.last_audio_frame_time.clone(),
-                daemon.recording_config.audio.microphone.enabled
-                    || daemon.recording_config.audio.background.enabled,
-            )
-        };
-
-        Self::spawn_bus_watcher(
-            daemon_arc.clone(),
-            &pipeline,
-            generation,
-            last_video_frame_time,
-            last_audio_frame_time,
-            audio_expected,
-            current_gen,
-            cancel_token.clone(),
-            shutdown_sender.clone(),
+    /// After creating our DaemonCore, we can start the whole system, putting it into a running
+    /// state, where we will recording, accept IPC calls, and wait for further termination input.
+    /// This will be a wrapper arouund setup() so we can change state if something fails inside
+    pub async fn start(&mut self) -> Result<(), WayclipError> {
+        // Put ourselves into the activating status & send notification to user that daemon is
+        // starting
+        self.update_status(DaemonStatus::Activating)?;
+        // Notification Manager does not need to be held persistently
+        NotificationManager::send_event(
+            NotificationEvent::DaemonStart,
+            &self.current_session.user_settings.notification,
+            String::default(),
         )?;
-        if discovery.enabled {
-            Self::spawn_discovery_update(
-                daemon_arc.clone(),
-                discovery.poll_interval_s,
-                cancel_token,
-            )?;
+
+        // We create a cancellation token & attempt to setup our daemon
+        let cancel_token = CancellationToken::new();
+        if let Err(e) = self.setup(cancel_token.clone()).await {
+            log::error!("error during setup: {}. shutting down...", e);
+            self.stop().await?;
+            exit(1);
         }
 
-        {
-            let mut daemon = daemon_arc.lock().await;
-            daemon.status = DaemonStatus::Active;
-            daemon.gstreamer_pipeline = Some(pipeline);
-        }
+        self.update_status(DaemonStatus::Active)?;
 
-        sd_notify::notify(&[NotifyState::Ready])?;
+        // After succesful start, we start our infinite event loop
+        self.event_loop(cancel_token).await?;
 
         Ok(())
     }
 
-    pub async fn build_full_pipeline(
-        daemon_arc: Arc<tokio::sync::Mutex<Self>>,
-        mut config: RecordingConfig,
-    ) -> Result<gstreamer::Pipeline, WayclipError> {
-        let pipewire_manager = {
-            let daemon = daemon_arc.lock().await;
-            daemon.pipewire_manager.clone()
-        };
+    /// Stop is our new graceful shutdown procedure, which handles properly stopping
+    pub async fn stop(&mut self) -> Result<(), WayclipError> {
+        // Mark as deactivating
+        self.update_status(DaemonStatus::Deactivating);
 
-        Self::check_audio_devices(&pipewire_manager, &mut config.audio).await?;
+        // stop the recording engine, close session and portal
+        self.engine.stop().await?;
 
-        let screencast = match Self::negotiate_screencast().await {
-            Ok(negotiation) => negotiation,
-            Err(e) => {
-                let mut daemon = daemon_arc.lock().await;
-                daemon.status = DaemonStatus::Failed;
-                return Err(e);
-            }
-        };
+        // remove the auto-bind
+        let mut desktop = DesktopEnvironmentManager::new(
+            self.current_session
+                .user_settings
+                .shortcuts
+                .save_clip
+                .clone(),
+        )?;
+        desktop.remove_auto_bind()?;
 
-        let pipeline = gstreamer::Pipeline::new();
-
-        let gl_display = daemon_arc.lock().await.gl_display.clone();
-        let bus = pipeline
-            .bus()
-            .ok_or_else(|| WayclipError::Validation("No bus found".into()))?;
-        bus.set_sync_handler(move |_, msg| {
-            if let gstreamer::MessageView::NeedContext(ctxt) = msg.view()
-                && ctxt.context_type() == *gstreamer_gl::GL_DISPLAY_CONTEXT_TYPE
-                && let Some(src) = msg
-                    .src()
-                    .and_then(|s| s.downcast_ref::<gstreamer::Element>())
-            {
-                let mut context = gstreamer::Context::new(ctxt.context_type(), true);
-                context.get_mut().unwrap().set_gl_display(&gl_display);
-                src.set_context(&context);
-            }
-
-            gstreamer::BusSyncReply::Pass
-        });
-
-        {
-            let mut daemon = daemon_arc.lock().await;
-            daemon.pipewire_session = Some(screencast.pipewire_session);
-            daemon.pipewire_file_descriptor = Some(screencast.pipewire_file_descriptor);
-            daemon.pipewire_node_id = Some(screencast.pipewire_node_id);
-            daemon.pipewire_proxy = Some(screencast.pipewire_proxy);
-            daemon.restore_token = screencast.restore_token;
-
-            daemon.build_video_pipeline(
-                &pipeline,
-                config.codec,
-                config.resolution.to_tuple(),
-                config.fps.0,
-                config.bitrate_kbps.0,
-            )?;
-
-            let mix = daemon.build_mix_pipeline(&pipeline, &config.audio)?;
-
-            let sample_rate = &config.audio.sample_rate_hz;
-            daemon.build_audio_source_pipeline(
-                &pipeline,
-                &config.audio.microphone,
-                DefaultDeviceType::Microphone,
-                sample_rate.0,
-                &mix,
-            )?;
-            daemon.build_audio_source_pipeline(
-                &pipeline,
-                &config.audio.background,
-                DefaultDeviceType::Background,
-                sample_rate.0,
-                &mix,
-            )?;
-
-            // Update all the 2 billion states
-            pipeline.set_start_time(ClockTime::ZERO);
-            pipeline.set_base_time(ClockTime::ZERO);
-
-            if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
-                let bus = pipeline
-                    .bus()
-                    .ok_or_else(|| WayclipError::Validation("No bus found".into()))?;
-                let mut reason = "unknown".to_string();
-                while let Some(msg) = bus.timed_pop(gstreamer::ClockTime::from_mseconds(500)) {
-                    if let gstreamer::MessageView::Error(err) = msg.view() {
-                        reason = format!(
-                            "{} ({:?}) from element {:?}",
-                            err.error(),
-                            err.debug(),
-                            err.src().map(|s| s.to_string())
-                        );
-                        break;
-                    }
-                }
-                let _ = pipeline.set_state(gstreamer::State::Null);
-                daemon.status = DaemonStatus::Failed;
-                return Err(WayclipError::Validation(
-                    format!("set_state(Playing) failed synchronously ({e:?}): {reason}").into(),
-                ));
-            }
-        }
-        let pipeline_for_wait = pipeline.clone();
-        let (state_result, current_state, _pending) = tokio::task::spawn_blocking(move || {
-            pipeline_for_wait.state(gstreamer::ClockTime::from_seconds(10))
-        })
-        .await
-        .map_err(|e| WayclipError::Validation(e.to_string().into()))?;
-
-        if state_result.is_err() || current_state != gstreamer::State::Playing {
-            // get the error
-            let bus = pipeline
-                .bus()
-                .ok_or_else(|| WayclipError::Validation("No bus found".into()))?;
-            let mut reason = "unknown".to_string();
-            // this whole thing is same as for preview/saving
-            while let Some(msg) = bus.timed_pop(gstreamer::ClockTime::ZERO) {
-                if let gstreamer::MessageView::Error(e) = msg.view() {
-                    reason = format!("{} ({:?})", e.error(), e.debug());
-                    break;
-                }
-            }
-
-            let _ = pipeline.set_state(gstreamer::State::Null);
-            let mut daemon = daemon_arc.lock().await;
-            daemon.status = DaemonStatus::Failed;
-            return Err(WayclipError::Validation(
-                format!(
-                    "Capture pipeline failed to reach PLAYING state ({:?}): {reason}",
-                    state_result
-                )
-                .into(),
-            ));
+        // For debug in ring buffer
+        if !std::io::stderr().is_terminal() {
+            eprint!("\r\x1b[2K");
         }
 
-        Ok(pipeline)
+        // send notification after done & mark as fully inactive
+        NotificationManager::send_event(
+            NotificationEvent::DaemonStop,
+            &self.current_session.user_settings.notification,
+            String::default(),
+        )?;
+        self.update_status(DaemonStatus::Inactive)?;
+
+        Ok(())
     }
 
-    pub fn new(
-        max_duration: u64,
-        notification_settings: NotificationSettings,
-        recording_config: RecordingConfig,
-        output_config: OutputSettings,
-        //discord_rich_presence: bool,
-    ) -> Result<Self, WayclipError> {
-        gstreamer::init()?;
+    async fn setup(&mut self, cancel_token: CancellationToken) -> Result<(), WayclipError> {
+        // Then, attempt to create a new connection so that processes can communicate with us
+        self.ipc.connect().await?;
 
-        let gl_display = gstreamer_gl_egl::GLDisplayEGL::new()?.upcast::<gstreamer_gl::GLDisplay>();
+        let mut desktop = DesktopEnvironmentManager::new(
+            self.current_session
+                .user_settings
+                .shortcuts
+                .save_clip
+                .clone(),
+        )?;
+        desktop.create_auto_bind(self.ipc.command_sender.clone())?;
 
-        Ok(Self {
-            id: nanoid!(),
-            discovery: Discovery::new()?,
-            status: DaemonStatus::Inactive,
-            generation: Arc::new(AtomicU64::new(1)),
-            last_video_frame_time: Arc::new(AtomicU64::new(0)),
-            last_audio_frame_time: Arc::new(AtomicU64::new(0)),
-            ring_buffer: Arc::new(Mutex::new(RingBuffer::new(ClockTime::from_seconds(
-                max_duration,
-            )))),
-            pipewire_manager: PipewireManager::new()?,
-            restore_token: None,
-            gstreamer_pipeline: None,
-            pipewire_proxy: None,
-            pipewire_node_id: None,
-            pipewire_file_descriptor: None,
-            pipewire_session: None,
-            notification_settings,
-            recording_config,
-            output_config,
-            //discord: if discord_rich_presence {
-            //    Some(DiscordPresenceManager::new())
-            //} else {
-            //    None
-            //},
-            gl_display,
-        })
+        if let Some(bind) = self
+            .current_session
+            .user_settings
+            .shortcuts
+            .save_clip_controller
+            .clone()
+        {
+            ControllerManager::start(bind, cancel_token.clone(), self.ipc.command_sender.clone())?;
+        }
+
+        WayclipTray::run_tray(
+            self.ipc.command_sender.clone(),
+            self.current_session.user_settings.tray.clone(),
+            cancel_token,
+        );
+
+        // ...build pipelines
+        // ...start watcher
+
+        Ok(())
+    }
+
+    /// Even loop will watch for SIGINT, SIGTERM, in addition to handling any IPC messages and
+    /// calling update() on services
+    async fn event_loop(&mut self, cancel_token: CancellationToken) -> Result<(), WayclipError> {
+        let mut tick = interval(Duration::from_millis(500));
+        let mut sigint = unix::signal(SignalKind::interrupt())?;
+        let mut sigterm = unix::signal(SignalKind::terminate())?;
+
+        loop {
+            tokio::select! {
+                _ = cancel_token.cancelled() => break,
+                _ = sigint.recv() => {
+                    log::info!("SIGINT received, stopping...");
+                    break;
+                }
+                _ = sigterm.recv() => {
+                    log::info!("SIGTERM received, stopping...");
+                    break;
+                }
+
+                _ = tick.tick() => {
+                    // self.services.update(&mut self.current_session).await?;
+                }
+
+                Some(ipc_command) = self.ipc.recieve() => {
+                    self.handle_ipc_command(ipc_command).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Once an IPC message is recieved, we can handle it direcrtly here, so that we can call method
+    /// ssuch as stop(), and more
+    async fn handle_ipc_command(&mut self, ipc_command: IpcCommand) -> Result<(), WayclipError> {
+        match ipc_command {
+            IpcCommand::Shutdown { .. } => self.stop().await?,
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    /// We need a separate method to handle changing statuses, because some will require just
+    /// changing daemon status field, whilst others will also require sending an sd_notify command
+    /// to systemd
+    fn update_status(&mut self, status: DaemonStatus) -> Result<(), WayclipError> {
+        match status {
+            DaemonStatus::Inactive => {
+                self.status = DaemonStatus::Inactive;
+                sd_notify::notify(&[NotifyState::Stopping])?;
+            }
+            DaemonStatus::Active => {
+                self.status = DaemonStatus::Active;
+                sd_notify::notify(&[NotifyState::Ready])?;
+            }
+            s => self.status = s,
+        }
+
+        Ok(())
     }
 }

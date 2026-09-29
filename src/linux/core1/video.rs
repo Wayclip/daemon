@@ -9,11 +9,11 @@ use std::os::fd::AsRawFd;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::recording::{CodecType, VideoCodec};
 
-const DEFAULT_MAX_SIZE_BUFFER: u32 = 0;
 const DEFAULT_CONFIG_INTERVAL: i32 = 1;
 const DEFAULT_GST_LEAKY_DOWNSTREAM: &str = "2";
+const DEFAULT_MAX_SIZE_BUFFER: u32 = 2;
 const DEFAULT_MAX_SIZE_BYTES: u32 = 0;
-const DEFAULT_MAX_SIZE_TIME_NS: u64 = 500000000;
+const DEFAULT_MAX_SIZE_TIME_NS: u64 = 0;
 const DEFAULT_GOP_SIZE: i32 = 30;
 const DEFAULT_KEYFRAME_PERIOD: u32 = 30;
 
@@ -115,17 +115,17 @@ impl DaemonCore {
         }
 
         let video_queue_1 = gstreamer::ElementFactory::make("queue")
-            .property("max-size-buffers", 30u32)
-            .property("max-size-bytes", 64u32 * 1024u32 * 1024u32)
-            .property("max-size-time", 250_000_000u64)
+            .property("max-size-buffers", DEFAULT_MAX_SIZE_BUFFER)
+            .property("max-size-bytes", DEFAULT_MAX_SIZE_BYTES)
+            .property("max-size-time", DEFAULT_MAX_SIZE_TIME_NS)
             .property_from_str("leaky", DEFAULT_GST_LEAKY_DOWNSTREAM)
             .name("video_queue_1")
             .build()?;
 
         let video_queue_2 = gstreamer::ElementFactory::make("queue")
-            .property("max-size-buffers", 30u32)
-            .property("max-size-bytes", 64u32 * 1024u32 * 1024u32)
-            .property("max-size-time", 250_000_000u64)
+            .property("max-size-buffers", DEFAULT_MAX_SIZE_BUFFER)
+            .property("max-size-bytes", DEFAULT_MAX_SIZE_BYTES)
+            .property("max-size-time", DEFAULT_MAX_SIZE_TIME_NS)
             .property_from_str("leaky", DEFAULT_GST_LEAKY_DOWNSTREAM)
             .name("video_queue_2")
             .build()?;

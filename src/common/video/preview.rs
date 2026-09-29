@@ -16,9 +16,9 @@ use std::{
 };
 use wayclip_core::{app::clips::ffmpeg::PreviewGenerator, models::error::WayclipError};
 
-const DEFAULT_PREVIEW_WIDTH: i32 = 480;
+pub const DEFAULT_PREVIEW_WIDTH: i32 = 480;
 pub const DEFAULT_PREVIEW_BITRATE: u32 = 800;
-const DEFAULT_PREVIEW_CLIP_LENGTH: u64 = 5;
+pub const DEFAULT_PREVIEW_CLIP_LENGTH: u64 = 5;
 
 pub struct PreviewManager;
 

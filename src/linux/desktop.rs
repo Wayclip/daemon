@@ -1,8 +1,8 @@
-use crate::linux::core::DaemonCore;
-use log::error;
+use crate::linux::core::ipc::commands::IpcCommand;
 use log::info;
-use std::{env, process::Command, sync::Arc};
-use tokio::sync::Mutex;
+use std::{env, process::Command};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::models::input::keyboard::WayclipKeyCombo;
 use wayclip_global_hotkey::GlobalHotKeyEvent;
@@ -33,7 +33,6 @@ pub enum DesktopEnvironmentType {
 }
 
 pub struct DesktopEnvironmentManager {
-    pub daemon: Arc<Mutex<DaemonCore>>,
     pub desktop: DesktopEnvironmentType,
     pub trigger_combo: WayclipKeyCombo,
     hotkey_manager: Option<GlobalHotKeyManager>,
@@ -41,14 +40,10 @@ pub struct DesktopEnvironmentManager {
 }
 
 impl DesktopEnvironmentManager {
-    pub fn new(
-        daemon: Arc<Mutex<DaemonCore>>,
-        trigger_combo: WayclipKeyCombo,
-    ) -> Result<Self, WayclipError> {
+    pub fn new(trigger_combo: WayclipKeyCombo) -> Result<Self, WayclipError> {
         let (desktop, _) = Self::get_env_session()?;
 
         Ok(Self {
-            daemon,
             desktop,
             trigger_combo,
             hotkey_manager: None,
@@ -131,7 +126,10 @@ impl DesktopEnvironmentManager {
         Ok(())
     }
 
-    pub fn setup_global_hotkey(&mut self) -> Result<(), WayclipError> {
+    pub fn setup_global_hotkey(
+        &mut self,
+        command_sender: mpsc::Sender<IpcCommand>,
+    ) -> Result<(), WayclipError> {
         log::info!("Using wayclip_global_hotkey");
 
         let (desktop, session) = Self::get_env_session()?;
@@ -166,17 +164,32 @@ impl DesktopEnvironmentManager {
         self.hotkey_manager = Some(manager);
         self.registered_hotkey = Some(hotkey);
 
-        let daemon_clone = self.daemon.clone();
+        let command_sender = command_sender.clone();
+        let hotkey_id = hotkey.id();
 
         tokio::task::spawn_blocking(move || {
-            // apparently to keep it alive and not drop it prematurely
             while let Ok(event) = GlobalHotKeyEvent::receiver().recv() {
-                if event.id() == hotkey.id() && event.state() == HotKeyState::Released {
+                if event.id() == hotkey_id && event.state() == HotKeyState::Released {
                     log::debug!("Hotkey triggered");
-                    let daemon_clone = Arc::clone(&daemon_clone);
+                    let tx = command_sender.clone();
+
                     tokio::spawn(async move {
-                        if let Err(e) = DaemonCore::save_clip(daemon_clone, None).await {
-                            error!("Error saving clip via shortcut: {e}")
+                        let (sender, receiver) = oneshot::channel();
+                        if tx
+                            .send(IpcCommand::SaveClip {
+                                custom_name: None,
+                                responder: sender,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            log::warn!("Daemon core offline, could not trigger clip");
+                            return;
+                        }
+                        match receiver.await {
+                            Ok(Ok(())) => log::info!("Clip saved successfully via hotkey"),
+                            Ok(Err(e)) => log::error!("Failed to save clip: {e:?}"),
+                            Err(_) => log::warn!("Daemon core dropped reply channel"),
                         }
                     });
                 }
@@ -186,7 +199,10 @@ impl DesktopEnvironmentManager {
         Ok(())
     }
 
-    pub fn create_auto_bind(&mut self) -> Result<(), WayclipError> {
+    pub fn create_auto_bind(
+        &mut self,
+        command_sender: mpsc::Sender<IpcCommand>,
+    ) -> Result<(), WayclipError> {
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
                 let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");
@@ -214,7 +230,7 @@ impl DesktopEnvironmentManager {
             }
             //DesktopEnvironmentType::Hyprland
             DesktopEnvironmentType::Gnome | DesktopEnvironmentType::Kde => {
-                self.setup_global_hotkey()?
+                self.setup_global_hotkey(command_sender)?
             }
             _ => info!(
                 "No auto bind setup available for your desktop environment. Please bind {} to {}",

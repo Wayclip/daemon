@@ -1,29 +1,20 @@
-use crate::linux::core::DaemonCore;
+use crate::linux::core::ipc::commands::IpcCommand;
 use gilrs::{EventType, Gilrs};
-use log::{debug, error};
-use std::{collections::HashSet, sync::Arc, time::Duration};
-use tokio::sync::Mutex;
+use log::debug;
+use std::{collections::HashSet, time::Duration};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::{error::WayclipError, input::controller::WayclipControllerCombo};
 
-pub struct ControllerManager {
-    pub daemon: Arc<Mutex<DaemonCore>>,
-    pub trigger_combo: WayclipControllerCombo,
-}
+pub struct ControllerManager;
 
 impl ControllerManager {
-    pub fn new(daemon: Arc<Mutex<DaemonCore>>, trigger_combo: WayclipControllerCombo) -> Self {
-        Self {
-            daemon,
-            trigger_combo,
-        }
-    }
-
-    pub fn setup(&self, cancel_token: CancellationToken) -> Result<(), WayclipError> {
+    pub fn start(
+        trigger_combo: WayclipControllerCombo,
+        cancel_token: CancellationToken,
+        command_sender: mpsc::Sender<IpcCommand>,
+    ) -> Result<(), WayclipError> {
         let mut gilrs = Gilrs::new()?;
-        let daemon_handle = self.daemon.clone();
-        let combo = self.trigger_combo.clone();
-
         tokio::task::spawn_blocking(move || {
             let mut held: HashSet<gilrs::Button> = HashSet::new();
             let mut combo_already_triggered = false;
@@ -34,14 +25,31 @@ impl ControllerManager {
                         EventType::ButtonPressed(button, _) => {
                             held.insert(button);
 
-                            if combo.is_satisfied(&held) && !combo_already_triggered {
+                            if trigger_combo.is_satisfied(&held) && !combo_already_triggered {
                                 debug!("Controller combo triggered");
                                 combo_already_triggered = true;
 
-                                let d_clone = daemon_handle.clone();
+                                let tx = command_sender.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = DaemonCore::save_clip(d_clone, None).await {
-                                        error!("Error saving clip via controller: {e}");
+                                    let (sender, receiver) = oneshot::channel();
+                                    if tx
+                                        .send(IpcCommand::SaveClip {
+                                            custom_name: None,
+                                            responder: sender,
+                                        })
+                                        .await
+                                        .is_err()
+                                    {
+                                        log::warn!("Daemon core offline, could not trigger clip");
+                                        return;
+                                    }
+
+                                    match receiver.await {
+                                        Ok(Ok(())) => {
+                                            log::info!("Clip saved successfully via hotkey")
+                                        }
+                                        Ok(Err(e)) => log::error!("Failed to save clip: {e:?}"),
+                                        Err(_) => log::warn!("Daemon core dropped reply channel"),
                                     }
                                 });
                             }
@@ -49,7 +57,7 @@ impl ControllerManager {
                         EventType::ButtonReleased(button, _) => {
                             held.remove(&button);
 
-                            if !combo.is_satisfied(&held) {
+                            if !trigger_combo.is_satisfied(&held) {
                                 combo_already_triggered = false;
                             }
                         }
