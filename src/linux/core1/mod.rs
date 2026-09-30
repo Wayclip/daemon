@@ -36,10 +36,6 @@ pub(crate) mod watcher;
 // const DEFAULT_ALLOW_MULTIPLE: bool = false;
 // Yes this is a hack i found online
 // changed it ACTUALLY be downstream now
-pub(crate) const DEFAULT_APPSINK_MAX_BUFFERS: u32 = 100;
-pub(crate) const DEFAULT_APPSINK_DROP: bool = false;
-pub(crate) const DEFAULT_APPSINK_SYNC: bool = false;
-pub(crate) const DEFAULT_PIPEWIRE_DO_TIMESTAMP: bool = true;
 pub(crate) const DEFAULT_AUDIO_CHANNELS: i32 = 2;
 pub(crate) const DEFAULT_PIPEWIRE_TIMEOUT: u64 = 4;
 
@@ -116,7 +112,7 @@ impl DaemonCore {
             daemon.pipewire_manager.clone()
         };
 
-        Self::check_audio_devices(&pipewire_manager, &mut config.audio).await?;
+        //Self::check_audio_devices(&pipewire_manager, &mut config.audio).await?;
 
         let screencast = match Self::negotiate_screencast().await {
             Ok(negotiation) => negotiation,

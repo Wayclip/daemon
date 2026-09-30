@@ -26,3 +26,13 @@ pub enum DefaultDeviceType {
     Microphone,
     Background,
 }
+
+impl DefaultDeviceType {
+    pub fn is_sink(&self) -> bool {
+        if self == &Self::Background {
+            true
+        } else {
+            false
+        }
+    }
+}

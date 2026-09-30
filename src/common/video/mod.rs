@@ -123,7 +123,7 @@ impl SaveManager {
         }
 
         // Intialise our new pipeline object
-        let mut pipeline = GStreamerPipeline::new();
+        let pipeline = GStreamerPipeline::new();
 
         // Extract the base pts & offset - we will use these as anchor points to make sure video,
         // audio and the real timestamps are synced properly
@@ -175,7 +175,7 @@ impl SaveManager {
             location: output_path.to_path_buf(),
         })?;
 
-        pipeline = pipeline.add_many([&mux, &file_sink])?;
+        pipeline.add_many([&mux, &file_sink])?;
         mux.link(&file_sink)?;
 
         // The AppSrc elelemnt will feed our raw memory buffers/frames into gstreamer, which is what
@@ -187,7 +187,7 @@ impl SaveManager {
             parser: video_stream.as_str().to_string().into(),
         })?;
 
-        pipeline = pipeline.add_many([
+        pipeline.add_many([
             video_appsrc.upcast_ref::<gstreamer::Element>(),
             &video_parser,
         ])?;
@@ -228,7 +228,7 @@ impl SaveManager {
                 parser: audio_stream.as_str().to_string().into(),
             })?;
 
-            pipeline = pipeline.add_many([
+            pipeline.add_many([
                 audio_appsrc.upcast_ref::<gstreamer::Element>(),
                 &audio_parser,
             ])?;
@@ -259,7 +259,7 @@ impl SaveManager {
         }
 
         // Then, set the state to playing, push the frames into the AppSrc & wait until EOS
-        pipeline = pipeline.set_state(gstreamer::State::Playing)?;
+        pipeline.set_state(gstreamer::State::Playing)?;
 
         let mut handles = Vec::new();
         for stream in streams {
