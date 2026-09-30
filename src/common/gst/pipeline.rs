@@ -1,13 +1,19 @@
+use std::sync::{Arc, Mutex};
+
 use gstreamer::{
     ClockTime, Element, MessageView, State, StateChangeSuccess,
     glib::object::{Cast, IsA},
-    prelude::{ElementExt, GstBinExt},
+    prelude::{ElementExt, ElementExtManual, GstBinExt, GstObjectExt},
 };
+use gstreamer_gl::{GL_DISPLAY_CONTEXT_TYPE, prelude::ContextGLExt};
 use wayclip_core::models::error::WayclipError;
 
 #[derive(Clone, Debug)]
 pub struct GStreamerPipeline {
     pipeline: gstreamer::Pipeline,
+    // We have to reserve back to Arc<Mutex<>> to track all the elements added so we can link stuff
+    // together easily
+    tracked_elements: Arc<Mutex<Vec<Element>>>,
 }
 
 pub struct GetStateResult {
@@ -21,7 +27,12 @@ impl GStreamerPipeline {
         let _ = gstreamer::init();
         Self {
             pipeline: gstreamer::Pipeline::new(),
+            tracked_elements: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn raw(&self) -> &gstreamer::Pipeline {
+        &self.pipeline
     }
 
     pub fn _get_state(&self, timeout: Option<ClockTime>) -> Result<GetStateResult, WayclipError> {
@@ -39,19 +50,71 @@ impl GStreamerPipeline {
         Ok(())
     }
 
-    pub fn _add(self, element: &impl IsA<Element>) -> Result<Self, WayclipError> {
-        self.pipeline.add(element.upcast_ref())?;
-        Ok(self)
+    pub fn add(&self, element: &impl IsA<Element>) -> Result<(), WayclipError> {
+        let element = element.upcast_ref::<Element>();
+        self.pipeline.add(element)?;
+        self.tracked_elements.lock().unwrap().push(element.clone());
+        Ok(())
     }
 
     pub fn add_many<'a, T: IsA<Element> + 'a>(
-        self,
+        &self,
         elements: impl IntoIterator<Item = &'a T>,
-    ) -> Result<Self, WayclipError> {
+    ) -> Result<(), WayclipError> {
+        let mut tracked = self.tracked_elements.lock().unwrap();
         for element in elements {
-            self.pipeline.add(element.upcast_ref())?;
+            let elem = element.upcast_ref::<Element>();
+            self.pipeline.add(elem)?;
+            tracked.push(elem.clone());
         }
-        Ok(self)
+        Ok(())
+    }
+
+    pub fn link(
+        &self,
+        src: &impl IsA<Element>,
+        dest: &impl IsA<Element>,
+    ) -> Result<(), WayclipError> {
+        let src_ref = src.upcast_ref::<Element>();
+        let dest_ref = dest.upcast_ref::<Element>();
+
+        src_ref.link(dest_ref).map_err(|_| {
+            WayclipError::Remux(
+                format!(
+                    "Failed to link element '{}' to '{}'",
+                    src_ref.name(),
+                    dest_ref.name()
+                )
+                .into(),
+            )
+        })
+    }
+
+    pub fn add_and_link(&self, elements: &[&impl IsA<Element>]) -> Result<(), WayclipError> {
+        if elements.is_empty() {
+            return Ok(());
+        }
+        for elem in elements {
+            self.add(*elem)?;
+        }
+
+        for window in elements.windows(2) {
+            self.link(window[0], window[1])?;
+        }
+
+        Ok(())
+    }
+
+    pub fn link_all(&self) -> Result<(), WayclipError> {
+        let tracked = self.tracked_elements.lock().unwrap();
+        for window in tracked.windows(2) {
+            self.link(&window[0], &window[1])?;
+        }
+        Ok(())
+    }
+
+    pub fn last_element(&self) -> Option<Element> {
+        self.tracked_elements.lock().unwrap().last().cloned()
     }
 
     pub fn wait_eos(self, timeout: ClockTime) -> Result<(), WayclipError> {
@@ -116,6 +179,46 @@ impl GStreamerPipeline {
         }
 
         self.clone().wait_eos(eos_timeout)?;
+
+        Ok(())
+    }
+
+    pub fn bind_gl_display(
+        &mut self,
+        gl_display: &gstreamer_gl::GLDisplay,
+    ) -> Result<(), WayclipError> {
+        let mut context = gstreamer::Context::new(GL_DISPLAY_CONTEXT_TYPE.as_str(), true);
+        context
+            .get_mut()
+            .ok_or_else(|| {
+                WayclipError::NotFound("Newly constructed context has unique ref".into())
+            })?
+            .set_gl_display(gl_display);
+
+        self.pipeline.set_context(&context);
+
+        let bus = self
+            .pipeline
+            .bus()
+            .ok_or_else(|| WayclipError::NotFound("Pipeline has no message bus".into()))?;
+
+        bus.set_sync_handler(move |_, msg| {
+            let gstreamer::MessageView::NeedContext(need_ctx) = msg.view() else {
+                return gstreamer::BusSyncReply::Pass;
+            };
+
+            if need_ctx.context_type() != *gstreamer_gl::GL_DISPLAY_CONTEXT_TYPE {
+                return gstreamer::BusSyncReply::Pass;
+            }
+            if let Some(src) = msg
+                .src()
+                .and_then(|s| s.downcast_ref::<gstreamer::Element>())
+            {
+                src.set_context(&context);
+            }
+
+            gstreamer::BusSyncReply::Pass
+        });
 
         Ok(())
     }

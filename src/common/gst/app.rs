@@ -1,5 +1,5 @@
 use gstreamer::{Caps, ClockTime};
-use gstreamer_app::AppSrc;
+use gstreamer_app::{AppSink, AppSrc};
 use wayclip_core::models::error::WayclipError;
 
 use crate::common::video::ring::data::{ContentType, EncodedFrame};
@@ -8,9 +8,21 @@ pub const DEFAULT_APPSRC_FORMAT: gstreamer::Format = gstreamer::Format::Time;
 pub const DEFAULT_APPSRC_IS_LIVE: bool = false;
 pub const DEFAULT_APPSRC_DO_TIMESTAMP: bool = false;
 
+pub const DEFAULT_APPSINK_MAX_BUFFERS: u32 = 100;
+pub const DEFAULT_APPSINK_DROP: bool = false;
+pub const DEFAULT_APPSINK_SYNC: bool = false;
+
 pub struct GStreamerApp;
 
 impl GStreamerApp {
+    pub fn build_app_sink() -> AppSink {
+        gstreamer_app::AppSink::builder()
+            .property("drop", DEFAULT_APPSINK_DROP)
+            .property("max-buffers", DEFAULT_APPSINK_MAX_BUFFERS)
+            .property("sync", DEFAULT_APPSINK_SYNC)
+            .build()
+    }
+
     pub fn build_app_src(caps: &Caps) -> AppSrc {
         gstreamer_app::AppSrc::builder()
             .caps(caps)
