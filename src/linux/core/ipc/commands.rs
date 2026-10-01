@@ -1,4 +1,4 @@
-use crate::linux::core1::types::DaemonStatus;
+use crate::linux::core::DaemonStatus;
 use tokio::sync::oneshot;
 use wayclip_core::models::error::WayclipError;
 

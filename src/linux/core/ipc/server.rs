@@ -1,5 +1,5 @@
+use crate::linux::core::DaemonStatus;
 use crate::linux::core::ipc::commands::IpcCommand;
-use crate::linux::core1::types::DaemonStatus;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use zbus::fdo;

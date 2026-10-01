@@ -50,6 +50,12 @@ impl GStreamerPipeline {
         Ok(())
     }
 
+    pub fn set_initial_time(&self, time: ClockTime) -> Result<(), WayclipError> {
+        self.pipeline.set_start_time(time);
+        self.pipeline.set_base_time(time);
+        Ok(())
+    }
+
     pub fn add(&self, element: &impl IsA<Element>) -> Result<(), WayclipError> {
         let element = element.upcast_ref::<Element>();
         self.pipeline.add(element)?;
@@ -151,6 +157,48 @@ impl GStreamerPipeline {
 
         self.pipeline.set_state(gstreamer::State::Null)?;
         result
+    }
+
+    pub fn last_error_message(&self, timeout: ClockTime) -> Option<String> {
+        let bus = self.pipeline.bus()?;
+        while let Some(msg) = bus.timed_pop(timeout) {
+            if let MessageView::Error(err) = msg.view() {
+                let src_name = err.src().map(|s| s.to_string()).unwrap_or_default();
+                return Some(format!(
+                    "{} ({:?}) from element {}",
+                    err.error(),
+                    err.debug(),
+                    src_name
+                ));
+            }
+        }
+        None
+    }
+
+    pub fn play_and_wait_ready(&self, timeout: ClockTime) -> Result<(), WayclipError> {
+        if let Err(e) = self.pipeline.set_state(State::Playing) {
+            let reason = self
+                .last_error_message(ClockTime::from_mseconds(500))
+                .unwrap_or_else(|| "unknown".to_string());
+            let _ = self.pipeline.set_state(State::Null);
+            return Err(WayclipError::Validation(
+                format!("Failed to set Playing synchronously ({e:?}): {reason}").into(),
+            ));
+        }
+
+        let (state_result, current_state, _) = self.pipeline.state(Some(timeout));
+        if state_result.is_err() || current_state != State::Playing {
+            let reason = self
+                .last_error_message(ClockTime::ZERO)
+                .unwrap_or_else(|| "unknown".to_string());
+            let _ = self.pipeline.set_state(State::Null);
+            return Err(WayclipError::Validation(
+                format!("Pipeline failed to reach PLAYING state ({state_result:?}): {reason}")
+                    .into(),
+            ));
+        }
+
+        Ok(())
     }
 
     pub fn play_and_wait_eos(

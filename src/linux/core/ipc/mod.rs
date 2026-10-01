@@ -1,13 +1,16 @@
-use crate::{
-    DEFAULT_DBUS_SERVICE, DEFAULT_INTERFACE_PATH,
-    linux::core::ipc::{commands::IpcCommand, server::DaemonServer},
-};
+use crate::linux::core::ipc::{commands::IpcCommand, server::DaemonServer};
 use tokio::sync::mpsc;
 use wayclip_core::models::error::WayclipError;
 use zbus::Connection;
 
+pub mod client;
 pub mod commands;
 pub mod server;
+
+pub const DEFAULT_SYSTEMD_SERVICE: &str = "wayclip-daemon.service";
+pub const DEFAULT_DBUS_SERVICE: &str = "org.wayclip.Daemon";
+pub const DEFAULT_MODE: &str = "replace";
+pub const DEFAULT_INTERFACE_PATH: &str = "/org/wayclip/Daemon";
 
 /// DaemonIpc will be responsible for communications with the daemon.
 pub struct DaemonIpc {

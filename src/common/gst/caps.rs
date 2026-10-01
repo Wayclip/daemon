@@ -34,7 +34,7 @@ pub enum GStreamerCapsType {
         memory: Option<VideoXRawMemory>,
     },
     AudioXRaw {
-        rate: i32,
+        rate: Option<i32>,
         channels: i32,
     },
     VideoXH264,
@@ -85,20 +85,23 @@ impl GStreamerCapsType {
                 }
                 caps
             }
-            Self::AudioXRaw { rate, channels } => GStreamerCaps {
-                name: "audio/x-raw".into(),
-                features: None,
-                fields: vec![
-                    GStreamerCapsField {
-                        name: "rate".into(),
-                        value: rate.into(),
-                    },
-                    GStreamerCapsField {
+            Self::AudioXRaw { rate, channels } => {
+                let mut caps = GStreamerCaps {
+                    name: "audio/x-raw".into(),
+                    features: None,
+                    fields: vec![GStreamerCapsField {
                         name: "channels".into(),
                         value: channels.into(),
-                    },
-                ],
-            },
+                    }],
+                };
+                if let Some(r) = rate {
+                    caps.fields.push(GStreamerCapsField {
+                        name: "rate".into(),
+                        value: r.to_send_value(),
+                    });
+                }
+                caps
+            }
             Self::VideoXH264 => GStreamerCaps {
                 name: "video/x-h264".into(),
                 features: None,

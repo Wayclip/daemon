@@ -26,7 +26,7 @@ Wayclip daemon provides the functionality to record and process data.
 | `xdg-desktop-portal` (backend specific) | Yes         | Required by `ashpd`'s `Screencast` portal                            |
 | D-Bus                                   | Yes         | Required by `zbus`                                                   |
 | `pipewire`                              | Yes         | Required by `pipewire` & checked using `$XDG_RUNTIME_DIR/pipewire-0` |
-| `systemd`                               | Optional    | Required by `DaemonManager`, controls via `org.freedesktop.systemd1` |
+| `systemd`                               | Optional    | Required by `DaemonClient`, controls via `org.freedesktop.systemd1`  |
 | `hyprctl` / `swaymsg`                   | Conditional | Only for Hyprland/Sway Key-Binding & Window Discovery                |
 | `gdbus`                                 | Conditional | Only for GNOME window discovery                                      |
 | Discord client                          | Conditional | Only if `discord_rich_presence` is enabled in settings               |

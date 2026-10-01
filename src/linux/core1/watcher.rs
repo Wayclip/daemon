@@ -16,36 +16,6 @@ const PIPELINE_STALL_S: u64 = 10;
 const AUDIO_SILENCE_LOG_S: u64 = 10;
 
 impl DaemonCore {
-    pub fn spawn_discovery_update(
-        daemon_arc: Arc<tokio::sync::Mutex<Self>>,
-        poll_interval_s: u64,
-        cancel_token: CancellationToken,
-    ) -> Result<(), WayclipError> {
-        tokio::spawn(async move {
-            let mut timer = interval(Duration::from_secs(poll_interval_s));
-
-            loop {
-                tokio::select! {
-                    _ = cancel_token.cancelled() => {
-                        log::debug!("Discovery update loop shutting down");
-                        break;
-                    }
-                    _ = timer.tick() => {
-                        let mut lock = daemon_arc.lock().await;
-                        lock.discovery.discover_game();
-                        let game_name = lock.discovery.confident_game().map(|g| g.to_string());
-                        log::debug!("(discord) confident game: {game_name:?}");
-                        //if let Some(discord) = &lock.discord {
-                        //    discord.set_recording(game_name);
-                        //}
-                    }
-                }
-            }
-        });
-
-        Ok(())
-    }
-
     pub fn spawn_bus_watcher(
         daemon_arc: Arc<tokio::sync::Mutex<Self>>,
         pipeline: &gstreamer::Pipeline,
