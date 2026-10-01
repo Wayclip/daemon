@@ -63,7 +63,11 @@ impl PreviewManager {
 
         // Create a new caps filter to accept and convert only video/x-raw frames with a specific width
         let caps = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
+            height: None,
+            framerate: None,
+            format: None,
             width: Some(DEFAULT_PREVIEW_WIDTH),
+            memory: None,
         });
         let caps_filter = GStreamer::build_element(GStreamerElementType::CapsFilter { caps })?;
 
@@ -78,7 +82,7 @@ impl PreviewManager {
             location: output_path.to_path_buf(),
         })?;
 
-        pipeline = pipeline.add_many([
+        pipeline.add_and_link(&[
             &file_src,
             &decode_bin,
             &video_convert_1,
@@ -89,14 +93,6 @@ impl PreviewManager {
             &parser,
             &mux,
             &file_sink,
-        ])?;
-        gstreamer::Element::link_many([
-            &video_convert_1,
-            &video_scale,
-            &video_convert_2,
-            &caps_filter,
-            &encoder,
-            &parser,
         ])?;
 
         // Acquire pads so we can check on the data

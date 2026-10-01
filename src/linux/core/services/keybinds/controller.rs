@@ -6,20 +6,29 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use wayclip_core::models::{error::WayclipError, input::controller::WayclipControllerCombo};
 
-pub struct ControllerManager;
+pub struct ControllerManager {
+    cancel_token: CancellationToken,
+}
 
 impl ControllerManager {
+    pub fn new(cancel_token: CancellationToken) -> Self {
+        Self { cancel_token }
+    }
+
     pub fn start(
+        &self,
         trigger_combo: WayclipControllerCombo,
-        cancel_token: CancellationToken,
         command_sender: mpsc::Sender<IpcCommand>,
-    ) -> Result<(), WayclipError> {
+    ) -> Result<Self, WayclipError> {
         let mut gilrs = Gilrs::new()?;
+        let cancel_token = CancellationToken::new();
+        let loop_token = cancel_token.clone();
+
         tokio::task::spawn_blocking(move || {
             let mut held: HashSet<gilrs::Button> = HashSet::new();
             let mut combo_already_triggered = false;
 
-            while !cancel_token.is_cancelled() {
+            while !loop_token.is_cancelled() {
                 if let Some(event) = gilrs.next_event_blocking(Some(Duration::from_millis(100))) {
                     match event.event {
                         EventType::ButtonPressed(button, _) => {
@@ -71,6 +80,16 @@ impl ControllerManager {
             }
         });
 
-        Ok(())
+        Ok(Self { cancel_token })
+    }
+
+    pub fn stop(&self) {
+        self.cancel_token.cancel();
+    }
+}
+
+impl Drop for ControllerManager {
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
     }
 }

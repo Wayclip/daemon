@@ -1,26 +1,21 @@
-use std::{io::IsTerminal, process::exit, time::Duration};
-
 use sd_notify::NotifyState;
+use serde::{Deserialize, Serialize};
+use std::{io::IsTerminal, process::exit, time::Duration};
 use tokio::{
     signal::unix::{self, SignalKind},
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
 use wayclip_core::{models::error::WayclipError, settings::UserSettings};
+use zbus::zvariant::Type;
 
 use crate::{
     common::misc::notifications::{NotificationEvent, NotificationManager},
-    linux::{
-        controller::ControllerManager,
-        core::{
-            engine::DaemonEngine,
-            ipc::{DaemonIpc, commands::IpcCommand},
-            services::DaemonServices,
-            session::CurrentSession,
-        },
-        core1::types::DaemonStatus,
-        desktop::DesktopEnvironmentManager,
-        tray::WayclipTray,
+    linux::core::{
+        engine::DaemonEngine,
+        ipc::{DaemonIpc, commands::IpcCommand},
+        services::DaemonServices,
+        session::CurrentSession,
     },
 };
 
@@ -28,6 +23,16 @@ pub mod engine;
 pub mod ipc;
 pub mod services;
 pub mod session;
+
+#[derive(Debug, Clone, PartialEq, Eq, Type, Serialize, Deserialize)]
+pub enum DaemonStatus {
+    Active,
+    Inactive,
+    Saving,
+    Activating,
+    Deactivating,
+    Failed,
+}
 
 /// The DaemonCore will act as the central orchistrator for the whole of daemon
 pub struct DaemonCore {
@@ -45,6 +50,7 @@ pub struct DaemonCore {
     /// Current Session stores dat about the current recording session, like the user, clip count &
     /// more
     current_session: CurrentSession,
+    cancel_token: CancellationToken,
 }
 
 impl DaemonCore {
@@ -54,13 +60,16 @@ impl DaemonCore {
         let user_settings = UserSettings::load()?;
         wayclip_core::set_locale(&user_settings.output.language.to_string());
 
+        let cancel_token = CancellationToken::new();
+
         Ok(Self {
             id: nanoid::nanoid!(),
             status: DaemonStatus::Inactive,
             engine: DaemonEngine::new(user_settings.recording.video.get_max_duration())?,
-            services: DaemonServices::new(&user_settings)?,
+            services: DaemonServices::new(&user_settings, cancel_token.clone())?,
             ipc: DaemonIpc::new()?,
             current_session: CurrentSession::new(user_settings, None),
+            cancel_token,
         })
     }
 
@@ -79,8 +88,7 @@ impl DaemonCore {
         )?;
 
         // We create a cancellation token & attempt to setup our daemon
-        let cancel_token = CancellationToken::new();
-        if let Err(e) = self.setup(cancel_token.clone()).await {
+        if let Err(e) = self.setup().await {
             log::error!("error during setup: {}. shutting down...", e);
             self.stop().await?;
             exit(1);
@@ -89,9 +97,7 @@ impl DaemonCore {
         self.update_status(DaemonStatus::Active)?;
 
         // After succesful start, we start our infinite event loop
-        self.event_loop(cancel_token).await?;
-
-        Ok(())
+        self.event_loop(self.cancel_token.clone()).await
     }
 
     /// Stop is our new graceful shutdown procedure, which handles properly stopping
@@ -103,14 +109,7 @@ impl DaemonCore {
         self.engine.stop().await?;
 
         // remove the auto-bind
-        let mut desktop = DesktopEnvironmentManager::new(
-            self.current_session
-                .user_settings
-                .shortcuts
-                .save_clip
-                .clone(),
-        )?;
-        desktop.remove_auto_bind()?;
+        self.services.stop_services().await?;
 
         // For debug in ring buffer
         if !std::io::stderr().is_terminal() {
@@ -128,37 +127,20 @@ impl DaemonCore {
         Ok(())
     }
 
-    async fn setup(&mut self, cancel_token: CancellationToken) -> Result<(), WayclipError> {
+    async fn setup(&mut self) -> Result<(), WayclipError> {
         // Then, attempt to create a new connection so that processes can communicate with us
         self.ipc.connect().await?;
 
-        let mut desktop = DesktopEnvironmentManager::new(
-            self.current_session
-                .user_settings
-                .shortcuts
-                .save_clip
-                .clone(),
+        self.engine
+            .setup(&self.current_session.user_settings)
+            .await?;
+
+        self.services.start_services(
+            &self.current_session.user_settings,
+            &self.ipc.command_sender,
         )?;
-        desktop.create_auto_bind(self.ipc.command_sender.clone())?;
 
-        if let Some(bind) = self
-            .current_session
-            .user_settings
-            .shortcuts
-            .save_clip_controller
-            .clone()
-        {
-            ControllerManager::start(bind, cancel_token.clone(), self.ipc.command_sender.clone())?;
-        }
-
-        WayclipTray::run_tray(
-            self.ipc.command_sender.clone(),
-            self.current_session.user_settings.tray.clone(),
-            cancel_token,
-        );
-
-        // ...build pipelines
-        // ...start watcher
+        // ...start watcher + recovery
 
         Ok(())
     }
@@ -172,18 +154,25 @@ impl DaemonCore {
 
         loop {
             tokio::select! {
-                _ = cancel_token.cancelled() => break,
+                // These 3 will shutdown daemon
+                _ = cancel_token.cancelled() => {
+                    log::info!("CancellationToken received, stopping...");
+                    self.stop().await?;
+                    exit(0);
+                },
                 _ = sigint.recv() => {
                     log::info!("SIGINT received, stopping...");
-                    break;
+                    self.stop().await?;
+                    exit(0);
                 }
                 _ = sigterm.recv() => {
                     log::info!("SIGTERM received, stopping...");
-                    break;
+                    self.stop().await?;
+                    exit(0);
                 }
 
                 _ = tick.tick() => {
-                    // self.services.update(&mut self.current_session).await?;
+                    self.services.update(self.current_session.clone())?;
                 }
 
                 Some(ipc_command) = self.ipc.recieve() => {
@@ -191,15 +180,56 @@ impl DaemonCore {
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Once an IPC message is recieved, we can handle it direcrtly here, so that we can call method
     /// ssuch as stop(), and more
     async fn handle_ipc_command(&mut self, ipc_command: IpcCommand) -> Result<(), WayclipError> {
         match ipc_command {
-            IpcCommand::Shutdown { .. } => self.stop().await?,
+            IpcCommand::GetStatus { responder } => responder
+                .send(self.status.clone())
+                .map_err(|_| WayclipError::Validation("Could not send GetStatus OK".into()))?,
+            IpcCommand::Shutdown { responder } => {
+                self.stop().await?;
+                responder
+                    .send(Ok(()))
+                    .map_err(|_| WayclipError::Validation("Could not send Shutdown OK".into()))?;
+                exit(0);
+            }
+            IpcCommand::SaveClip {
+                custom_name,
+                responder,
+            } => {
+                if self.status == DaemonStatus::Saving {
+                    return Ok(());
+                }
+
+                self.update_status(DaemonStatus::Saving)?;
+
+                if let Err(e) = self.engine.save(&self.current_session, custom_name).await {
+                    self.update_status(DaemonStatus::Failed)?;
+                    NotificationManager::send_event(
+                        NotificationEvent::SaveError,
+                        &self.current_session.user_settings.notification,
+                        e.to_string(),
+                    )?;
+                    responder.send(Err(e)).map_err(|_| {
+                        WayclipError::Validation("Could not send SaveClip ERR".into())
+                    })?;
+                } else {
+                    //no-op
+                    self.update_status(DaemonStatus::Active)?;
+                    NotificationManager::send_event(
+                        NotificationEvent::SaveSuccess,
+                        &self.current_session.user_settings.notification,
+                        String::default(),
+                    )?;
+
+                    responder.send(Ok(())).map_err(|_| {
+                        WayclipError::Validation("Could not send SaveClip OK".into())
+                    })?;
+                }
+            }
             _ => (),
         }
 

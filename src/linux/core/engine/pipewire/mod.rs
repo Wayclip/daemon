@@ -8,23 +8,13 @@ use ashpd::{
     },
     enumflags2::BitFlags,
 };
-use gstreamer::glib::object::ObjectExt;
 use std::{
     fs::{create_dir_all, read_to_string, write},
     os::fd::{AsRawFd, OwnedFd},
 };
-use wayclip_core::{models::error::WayclipError, settings::UserSettings};
+use wayclip_core::models::error::WayclipError;
 
-use crate::{
-    common::gst::{
-        GStreamer, app::DEFAULT_APPSRC_DO_TIMESTAMP, caps::GStreamerCapsType,
-        element::GStreamerElementType, pipeline::GStreamerPipeline,
-    },
-    linux::{
-        core::engine::pipewire::manager::PipewireManager,
-        core1::{DEFAULT_AUDIO_CHANNELS, types::DefaultDeviceType},
-    },
-};
+use crate::linux::core::engine::pipewire::manager::PipewireManager;
 
 const DEFAULT_SOURCE_TYPE: SourceType = SourceType::Monitor;
 const DEFAULT_RESTORE_TOKEN_PATH: &str = "wayclip/restore_token";
@@ -35,8 +25,8 @@ pub mod manager;
 
 // We use ashpd to capute the screen, however, the input is provided by pipewire anyway
 pub struct DaemonEnginePipewire {
-    manager: PipewireManager,
-    connection_data: DaemonEngineConnectionData,
+    pub manager: PipewireManager,
+    pub connection_data: DaemonEngineConnectionData,
 }
 
 #[derive(Default)]
@@ -84,146 +74,6 @@ impl DaemonEnginePipewire {
         if let Some(session) = self.connection_data.session.take() {
             session.close().await?;
         }
-
-        Ok(())
-    }
-
-    /// This method will initialise all the audio-related things...
-    /// This method will query the current pipewire state (which by the time this method is called
-    /// should have already collected enough data).
-    /// We will try to find the specified node names in current pipewire state. If fail -> display
-    /// error & use default devices.
-    /// This method is not responsible for CHANING user settings if something is wrong. Only using
-    /// defaults to avoid fatal errors.
-    pub fn audio_setup(
-        &mut self,
-        pipeline: &GStreamerPipeline,
-        user_settings: &UserSettings,
-        sink_pad: &gstreamer::Pad,
-    ) -> Result<(), WayclipError> {
-        let state = self.manager.current_state();
-        let audio = &user_settings.recording.audio;
-
-        if audio.background.enabled {
-            let (node_name, node_level) = match self
-                .manager
-                .is_node_name_valid(&audio.background.node_name, manager::PipewireNodeType::Sink)
-            {
-                true => (&audio.background.node_name, audio.background.level.0),
-                false => {
-                    log::error!(
-                        "Audio device {} doesnt exist. Falling back to system defaults.",
-                        audio.background.node_name
-                    );
-                    (
-                        &state
-                            .default_sink
-                            .ok_or_else(|| WayclipError::NotFound("No default sink found".into()))?
-                            .node_name,
-                        audio.background.level.0,
-                    )
-                }
-            };
-
-            let node_id = self
-                .manager
-                .get_node_id_from_node_name(node_name)
-                .ok_or_else(|| WayclipError::NotFound("No ID found for the sink".into()))?;
-
-            self.setup_audio_device(
-                pipeline,
-                user_settings,
-                node_id,
-                node_level,
-                DefaultDeviceType::Background,
-                sink_pad,
-            )?;
-        }
-
-        if audio.microphone.enabled {
-            let (node_name, node_level) = match self.manager.is_node_name_valid(
-                &audio.microphone.node_name,
-                manager::PipewireNodeType::Source,
-            ) {
-                true => (&audio.microphone.node_name, audio.microphone.level.0),
-                false => {
-                    log::error!(
-                        "Audio device {} doesnt exist. Falling back to system defaults.",
-                        audio.microphone.node_name
-                    );
-                    (
-                        &state
-                            .default_source
-                            .ok_or_else(|| {
-                                WayclipError::NotFound("No default source found".into())
-                            })?
-                            .node_name,
-                        1.0,
-                    )
-                }
-            };
-
-            let node_id = self
-                .manager
-                .get_node_id_from_node_name(node_name)
-                .ok_or_else(|| WayclipError::NotFound("No ID found for the source".into()))?;
-
-            self.setup_audio_device(
-                pipeline,
-                user_settings,
-                node_id,
-                node_level,
-                DefaultDeviceType::Microphone,
-                sink_pad,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    /// This method will solely use minimal information provided to link up the correct audio device
-    /// to our pipeline.
-    ///
-    /// No safety checks are made directly here if the node is on or if its valid, since that is
-    /// done before calling this method
-    fn setup_audio_device(
-        &mut self,
-        pipeline: &GStreamerPipeline,
-        user_settings: &UserSettings,
-        audio_node_id: u32,
-        audio_node_level: f64,
-        audio_node_type: DefaultDeviceType,
-        sink_pad: &gstreamer::Pad,
-    ) -> Result<(), WayclipError> {
-        let pipewire_src = GStreamer::build_element(GStreamerElementType::AudioPipewireSrc {
-            do_timestamp: DEFAULT_APPSRC_DO_TIMESTAMP,
-            target_object: audio_node_id.to_string().into(),
-            sink: audio_node_type.is_sink(),
-        })?;
-
-        let queue = GStreamer::build_element(GStreamerElementType::AudioQueue)?;
-
-        let caps = GStreamer::build_caps(GStreamerCapsType::AudioXRaw {
-            rate: user_settings.recording.audio.sample_rate_hz.0 as i32,
-            channels: DEFAULT_AUDIO_CHANNELS,
-        });
-        let caps_filter = GStreamer::build_element(GStreamerElementType::CapsFilter { caps })?;
-
-        let audioconvert = GStreamer::build_element(GStreamerElementType::AudioConvert)?;
-        let audioresample = GStreamer::build_element(GStreamerElementType::AudioResample)?;
-
-        sink_pad.set_property("volume", audio_node_level);
-
-        pipeline.add_and_link(&[
-            &pipewire_src,
-            &queue,
-            &audioconvert,
-            &audioresample,
-            &caps_filter,
-        ])?;
-
-        let src_pad = GStreamer::get_static_pad(&audioresample, "src")?;
-        GStreamer::link_pads(&src_pad, &sink_pad)?;
 
         Ok(())
     }

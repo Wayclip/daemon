@@ -1,7 +1,4 @@
-use crate::{
-    common::misc::notifications::{NotificationEvent, NotificationManager},
-    linux::pipewire::PipewireManager,
-};
+use crate::common::misc::notifications::{NotificationEvent, NotificationManager};
 use ashpd::desktop::screencast::Screencast;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -35,6 +32,7 @@ pub struct Doctor {
     pub background: (String, bool),
 }
 
+pub const DEFAULT_PIPEWIRE_TIMEOUT: u64 = 4;
 pub const XDG_PORTAL_TIMEOUT_S: u64 = 4;
 
 impl Doctor {
@@ -255,6 +253,12 @@ impl Doctor {
     pub async fn check_gstreamer_elements(&self) -> Vec<DoctorResult> {
         gstreamer::init().unwrap_or_default();
 
+        let video_parser = self.video_codec.get_parser();
+        let video_encoder = self.video_codec.get_encoder();
+        let video_mux = self.video_format.get_mux();
+        let audio_parser = self.audio_codec.get_parser();
+        let audio_encoder = self.audio_codec.get_encoder();
+
         let element_checks: Vec<(&str, bool)> = vec![
             // default ones
             ("pipewiresrc", true),
@@ -265,11 +269,11 @@ impl Doctor {
             ("videoscale", true),
             ("videorate", true),
             // depends on config
-            (self.video_codec.get_parser(), true),
-            (self.video_codec.get_encoder(), true),
-            (self.video_format.get_mux(), true),
-            (self.audio_codec.get_parser(), true),
-            (self.audio_codec.get_encoder(), true),
+            (video_parser.as_ref(), true),
+            (video_encoder.as_ref(), true),
+            (video_mux.as_ref(), true),
+            (audio_parser.as_ref(), true),
+            (audio_encoder.as_ref(), true),
             // optional
             ("nvh264enc", false),
             ("vah264enc", false),

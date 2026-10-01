@@ -9,11 +9,6 @@ use wayclip_global_hotkey::GlobalHotKeyEvent;
 use wayclip_global_hotkey::HotKeyState;
 use wayclip_global_hotkey::{GlobalHotKeyManager, hotkey::HotKey};
 
-// This is specifically only for linux.
-// handles different distros and environments to make a bind
-
-// i will be real, there is no *real* use for this yet... since im pretty sure everything here so
-// far works both wayland & x11
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum SessionType {
     X11,
@@ -32,14 +27,14 @@ pub enum DesktopEnvironmentType {
     Unknown,
 }
 
-pub struct DesktopEnvironmentManager {
+pub struct DesktopManager {
     pub desktop: DesktopEnvironmentType,
     pub trigger_combo: WayclipKeyCombo,
     hotkey_manager: Option<GlobalHotKeyManager>,
     registered_hotkey: Option<HotKey>,
 }
 
-impl DesktopEnvironmentManager {
+impl DesktopManager {
     pub fn new(trigger_combo: WayclipKeyCombo) -> Result<Self, WayclipError> {
         let (desktop, _) = Self::get_env_session()?;
 
@@ -52,7 +47,6 @@ impl DesktopEnvironmentManager {
     }
 
     pub fn get_env_session() -> Result<(DesktopEnvironmentType, SessionType), WayclipError> {
-        // default to wayland since way-clip. way -> wayland. haha
         let session_env = env::var("XDG_SESSION_TYPE").unwrap_or("wayland".to_string());
         let session = match session_env.to_lowercase().as_str() {
             "wayland" => SessionType::Wayland,
@@ -99,23 +93,24 @@ impl DesktopEnvironmentManager {
         Ok(())
     }
 
-    fn get_trigger_command_string(&self) -> Result<String, WayclipError> {
-        let env = env::current_exe()?;
-        let parent = env
-            .parent()
-            .ok_or_else(|| WayclipError::NotFound("No parent found".into()))?;
-
-        // TODO: for now the CLI crate is named `wayclip-cli-linux`, hence the binary would also be called this way
-        let process_path = parent.join("wayclip-cli-linux");
-        let process_string = process_path
-            .to_str()
-            .ok_or_else(|| WayclipError::Validation("Could not convert to str".into()))?
-            .to_string();
-
-        Ok(format!("{process_string} daemon save"))
+    // instead of calling CLI to execute a call, we just call dbus directly..
+    fn get_trigger_command_string(&self) -> String {
+        match self.desktop {
+            DesktopEnvironmentType::Kde => {
+                "qdbus org.wayclip.Daemon1 /org/wayclip/Daemon1 org.wayclip.Daemon1.SaveClip".to_string()
+            }
+            DesktopEnvironmentType::Gnome => {
+                "gdbus call --session --dest org.wayclip.Daemon1 --object-path /org/wayclip/Daemon1 --method org.wayclip.Daemon1.SaveClip".to_string()
+            }
+            DesktopEnvironmentType::Hyprland
+            | DesktopEnvironmentType::Sway
+            | DesktopEnvironmentType::Unknown => {
+                "busctl --user call org.wayclip.Daemon1 /org/wayclip/Daemon1 org.wayclip.Daemon1 SaveClip".to_string()
+            }
+        }
     }
 
-    pub fn remove_global_hotkey(&mut self) -> Result<(), WayclipError> {
+    fn remove_global_hotkey(&mut self) -> Result<(), WayclipError> {
         if let (Some(manager), Some(hotkey)) =
             (self.hotkey_manager.take(), self.registered_hotkey.take())
             && let Err(e) = manager.unregister(hotkey)
@@ -126,9 +121,9 @@ impl DesktopEnvironmentManager {
         Ok(())
     }
 
-    pub fn setup_global_hotkey(
+    fn setup_global_hotkey(
         &mut self,
-        command_sender: mpsc::Sender<IpcCommand>,
+        command_sender: &mpsc::Sender<IpcCommand>,
     ) -> Result<(), WayclipError> {
         log::info!("Using wayclip_global_hotkey");
 
@@ -201,12 +196,12 @@ impl DesktopEnvironmentManager {
 
     pub fn create_auto_bind(
         &mut self,
-        command_sender: mpsc::Sender<IpcCommand>,
+        command_sender: &mpsc::Sender<IpcCommand>,
     ) -> Result<(), WayclipError> {
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
                 let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");
-                let trigger_cmd = self.get_trigger_command_string()?;
+                let trigger_cmd = self.get_trigger_command_string();
 
                 let full_string = format!(
                     "hl.bind(\"{}\", hl.dsp.exec_cmd(\"{}\"))",
@@ -219,7 +214,7 @@ impl DesktopEnvironmentManager {
             }
             DesktopEnvironmentType::Sway => {
                 let bind_string = self.trigger_combo.to_string();
-                let trigger_cmd = self.get_trigger_command_string()?;
+                let trigger_cmd = self.get_trigger_command_string();
 
                 let mut cmd = Command::new("swaymsg");
                 cmd.arg("bindsym")
@@ -235,7 +230,7 @@ impl DesktopEnvironmentManager {
             _ => info!(
                 "No auto bind setup available for your desktop environment. Please bind {} to {}",
                 self.trigger_combo,
-                self.get_trigger_command_string()?
+                self.get_trigger_command_string()
             ),
         }
 
@@ -271,7 +266,7 @@ impl DesktopEnvironmentManager {
 }
 
 // Muight not always run automatically, so we do some manual calls too
-impl Drop for DesktopEnvironmentManager {
+impl Drop for DesktopManager {
     fn drop(&mut self) {
         if let Err(e) = self.remove_auto_bind() {
             log::warn!("Failed to unbind hotkeys on drop: {e:?}");

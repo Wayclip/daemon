@@ -1,6 +1,6 @@
 use crate::{
     common::misc::discord::custom::CustomDiscordPresenceManager,
-    linux::core::session::{CurrentSession, LastClipInfo},
+    linux::core::session::{CurrentSession, LastClipInfo, UserSessionInfo},
 };
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
@@ -170,11 +170,15 @@ impl DiscordPresenceManager {
         Self { tx, state }
     }
 
-    //pub fn set_recording(&self, game: Option<String>) {
-    //    let _ = self.tx.send(PresenceCommand::Recording { game });
-    //}
+    pub fn set_recording(&self, current_session: CurrentSession) {
+        let _ = self
+            .tx
+            .send(PresenceCommand::RecordingEvent { current_session });
+    }
 
-    //pub fn set_idle(&self) {
-    //    let _ = self.tx.send(PresenceCommand::Idle);
-    //}
+    pub fn set_saving(&self, current_session: CurrentSession) {
+        let _ = self
+            .tx
+            .send(PresenceCommand::SavingEvent { current_session });
+    }
 }

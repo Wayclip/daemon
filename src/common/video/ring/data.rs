@@ -80,11 +80,25 @@ impl SaveData {
             _ => Ok(None),
         }
     }
+
     pub fn clear_caps(&self, caps: Caps) -> Caps {
         let mut builder = Caps::builder_full();
         for structure in caps.iter() {
             builder = builder.structure(structure.to_owned());
         }
         builder.build()
+    }
+
+    pub fn get_bytes(&self) -> (u64, u64) {
+        (
+            self.video_frames
+                .iter()
+                .map(|f| f.payload.size() as u64)
+                .sum::<u64>(),
+            self.audio_frames
+                .iter()
+                .map(|f| f.payload.size() as u64)
+                .sum::<u64>(),
+        )
     }
 }

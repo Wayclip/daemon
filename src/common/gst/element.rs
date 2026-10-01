@@ -12,6 +12,7 @@ use crate::DEFAULT_PREVIEW_BITRATE;
 /// This enum will contain every standardised element identifier
 #[derive(Clone, Debug)]
 pub enum GStreamerElementType {
+    AudioMixer,
     VAPostProc,
     GLUpload,
     GLColorScale,
@@ -68,6 +69,19 @@ impl GStreamerElementType {
     /// any additional properties
     pub fn get_element(&self) -> GStreamerElement {
         match self {
+            Self::AudioMixer => GStreamerElement {
+                factoryname: "audiomixer".into(),
+                properties: vec![
+                    GStreamerElementProperty {
+                        name: "start-time-selection".into(),
+                        value: GStreamerElementPropertyValue::Serialized("zero".into()),
+                    },
+                    GStreamerElementProperty {
+                        name: "ignore-inactive-pads".into(),
+                        value: GStreamerElementPropertyValue::Typed(true.into()),
+                    },
+                ],
+            },
             Self::VAPostProc => GStreamerElement {
                 factoryname: "vapostproc".into(),
                 ..Default::default()

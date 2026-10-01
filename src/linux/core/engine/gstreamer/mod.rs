@@ -1,18 +1,24 @@
+use gstreamer::ClockTime;
 use gstreamer::Element;
 use gstreamer::{State, glib::object::Cast};
+use gstreamer_app::AppSinkCallbacks;
+use parking_lot::Mutex;
+use std::sync::Arc;
+use std::time::Instant;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::UserSettings;
 
-use crate::common::gst::GStreamer;
-use crate::common::gst::app::{DEFAULT_APPSRC_DO_TIMESTAMP, GStreamerApp};
-use crate::common::gst::caps::{GStreamerCapsType, VideoXRawFormat, VideoXRawMemory};
-use crate::common::gst::element::{
-    GStreamerElement, GStreamerElementProperty, GStreamerElementPropertyValue, GStreamerElementType,
+use crate::common::gst::app::GStreamerApp;
+use crate::common::video::ring::{
+    RingBuffer,
+    data::{ContentType, EncodedFrame},
 };
+use crate::linux::core::engine::gstreamer::audio::AudioBranchBuilder;
+use crate::linux::core::engine::gstreamer::audio::device::AudioDeviceFactory;
+use crate::linux::core::engine::gstreamer::video::VideoBranchBuilder;
 use crate::linux::core::engine::pipewire::DaemonEngineConnectionData;
-use crate::linux::core1::DEFAULT_PIPEWIRE_DO_TIMESTAMP;
-use gstreamer::prelude::{ElementExt, PadExtManual};
-use wayclip_core::settings::recording::{CodecType, VideoCodec};
+use crate::linux::core::engine::pipewire::manager::PipewireManager;
+use wayclip_core::settings::recording::CodecType;
 
 const DEFAULT_CONFIG_INTERVAL: i32 = 1;
 const DEFAULT_GST_LEAKY_DOWNSTREAM: &str = "2";
@@ -21,6 +27,10 @@ const DEFAULT_MAX_SIZE_BYTES: u32 = 0;
 const DEFAULT_MAX_SIZE_TIME_NS: u64 = 0;
 const DEFAULT_GOP_SIZE: i32 = 30;
 const DEFAULT_KEYFRAME_PERIOD: u32 = 30;
+
+pub mod audio;
+pub mod save;
+pub mod video;
 
 use crate::common::gst::pipeline::GStreamerPipeline;
 
@@ -49,6 +59,8 @@ impl DaemonEngineGStreamer {
         &mut self,
         user_settings: &UserSettings,
         connection_data: &DaemonEngineConnectionData,
+        manager: &PipewireManager,
+        ring: Arc<Mutex<RingBuffer>>,
     ) -> Result<(), WayclipError> {
         if matches!(
             user_settings.recording.video.codec.get_backend(),
@@ -59,523 +71,185 @@ impl DaemonEngineGStreamer {
             self.pipeline.bind_gl_display(&gl_display)?;
         }
 
-        self.setup_video(user_settings, connection_data)?;
+        self.setup_video(user_settings, connection_data, Arc::clone(&ring))?;
+        self.setup_audio(user_settings, manager, Arc::clone(&ring))?;
 
-        //    let mix = daemon.build_mix_pipeline(&pipeline, &config.audio)?;
-
-        //    let sample_rate = &config.audio.sample_rate_hz;
-        //    daemon.build_audio_source_pipeline(
-        //        &pipeline,
-        //        &config.audio.microphone,
-        //        DefaultDeviceType::Microphone,
-        //        sample_rate.0,
-        //        &mix,
-        //    )?;
-        //    daemon.build_audio_source_pipeline(
-        //        &pipeline,
-        //        &config.audio.background,
-        //        DefaultDeviceType::Background,
-        //        sample_rate.0,
-        //        &mix,
-        //    )?;
-
-        //    // Update all the 2 billion states
-        //    pipeline.set_start_time(ClockTime::ZERO);
-        //    pipeline.set_base_time(ClockTime::ZERO);
-
-        //    if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
-        //        let bus = pipeline
-        //            .bus()
-        //            .ok_or_else(|| WayclipError::Validation("No bus found".into()))?;
-        //        let mut reason = "unknown".to_string();
-        //        while let Some(msg) = bus.timed_pop(gstreamer::ClockTime::from_mseconds(500)) {
-        //            if let gstreamer::MessageView::Error(err) = msg.view() {
-        //                reason = format!(
-        //                    "{} ({:?}) from element {:?}",
-        //                    err.error(),
-        //                    err.debug(),
-        //                    err.src().map(|s| s.to_string())
-        //                );
-        //                break;
-        //            }
-        //        }
-        //        let _ = pipeline.set_state(gstreamer::State::Null);
-        //        daemon.status = DaemonStatus::Failed;
-        //        return Err(WayclipError::Validation(
-        //            format!("set_state(Playing) failed synchronously ({e:?}): {reason}").into(),
-        //        ));
-        //    }
-        //}
-        //let pipeline_for_wait = pipeline.clone();
-        //let (state_result, current_state, _pending) = tokio::task::spawn_blocking(move || {
-        //    pipeline_for_wait.state(gstreamer::ClockTime::from_seconds(10))
-        //})
-        //.await
-        //.map_err(|e| WayclipError::Validation(e.to_string().into()))?;
-
-        //if state_result.is_err() || current_state != gstreamer::State::Playing {
-        //    // get the error
-        //    let bus = pipeline
-        //        .bus()
-        //        .ok_or_else(|| WayclipError::Validation("No bus found".into()))?;
-        //    let mut reason = "unknown".to_string();
-        //    // this whole thing is same as for preview/saving
-        //    while let Some(msg) = bus.timed_pop(gstreamer::ClockTime::ZERO) {
-        //        if let gstreamer::MessageView::Error(e) = msg.view() {
-        //            reason = format!("{} ({:?})", e.error(), e.debug());
-        //            break;
-        //        }
-        //    }
-
-        //    let _ = pipeline.set_state(gstreamer::State::Null);
-        //    let mut daemon = daemon_arc.lock().await;
-        //    daemon.status = DaemonStatus::Failed;
-        //    return Err(WayclipError::Validation(
-        //        format!(
-        //            "Capture pipeline failed to reach PLAYING state ({:?}): {reason}",
-        //            state_result
-        //        )
-        //        .into(),
-        //    ));
-        //}
-
-        //Ok(pipeline)
         Ok(())
+    }
+
+    pub async fn start(&mut self) -> Result<(), WayclipError> {
+        self.pipeline.set_initial_time(ClockTime::ZERO);
+
+        let pipeline_clone = self.pipeline.clone();
+
+        tokio::task::spawn_blocking(move || {
+            pipeline_clone.play_and_wait_ready(gstreamer::ClockTime::from_seconds(10))
+        })
+        .await
+        .map_err(|e| WayclipError::Validation(e.to_string().into()))?
     }
 
     fn setup_video(
         &mut self,
         user_settings: &UserSettings,
         connection_data: &DaemonEngineConnectionData,
+        ring: Arc<Mutex<RingBuffer>>,
     ) -> Result<(), WayclipError> {
-        let (file_descriptor, node_id) = connection_data.extract_data()?;
+        let video_branch = VideoBranchBuilder::new(user_settings, connection_data).build()?;
 
-        let pipewire_src = GStreamer::build_element(GStreamerElementType::VideoPipewireSrc {
-            do_timestamp: DEFAULT_APPSRC_DO_TIMESTAMP,
-            fd: file_descriptor,
-            path: node_id.into(),
-            keepalive_ms: 1000 / user_settings.recording.video.fps.0 as i32,
-        })?;
-
-        #[cfg(debug_assertions)]
-        if let Some(src_pad) = pipewire_src.static_pad("src") {
-            src_pad.add_probe(gstreamer::PadProbeType::EVENT_DOWNSTREAM, |_, info| {
-                if let Some(gstreamer::PadProbeData::Event(ref event)) = info.data
-                    && let gstreamer::EventView::Caps(caps_event) = event.view()
-                {
-                    let caps = caps_event.caps();
-
-                    log::info!("Negotiated initial caps: {:?}", caps);
-
-                    return gstreamer::PadProbeReturn::Remove;
-                }
-                gstreamer::PadProbeReturn::Ok
-            });
-        }
-
-        let video_queue_1 = GStreamer::build_element(GStreamerElementType::VideoQueue {
-            buffers: DEFAULT_MAX_SIZE_BUFFER,
-            bytes: DEFAULT_MAX_SIZE_BYTES,
-            time: DEFAULT_MAX_SIZE_TIME_NS,
-            leaky: DEFAULT_GST_LEAKY_DOWNSTREAM.into(),
-        })?;
-
-        let video_queue_2 = GStreamer::build_element(GStreamerElementType::VideoQueue {
-            buffers: DEFAULT_MAX_SIZE_BUFFER,
-            bytes: DEFAULT_MAX_SIZE_BYTES,
-            time: DEFAULT_MAX_SIZE_TIME_NS,
-            leaky: DEFAULT_GST_LEAKY_DOWNSTREAM.into(),
-        })?;
-
-        let (parser, parser_caps_filter) =
-            self.get_parser_and_filter(&user_settings.recording.video.codec)?;
-
-        let (mut video_pipeline, pre_encode_caps_filter) =
-            self.get_parser_pipeline(pipewire_src, video_queue_1, user_settings)?;
-
-        let encoder_pipeline =
-            self.get_encoder_pipeline(user_settings, parser, parser_caps_filter)?;
-
-        // Although this is not really an audio queue, i just define audio queue as being queue with
-        // no parameters :)
-        // TODO: CHANGE
-        let video_queue_3 = GStreamer::build_element(GStreamerElementType::AudioQueue)?;
-
-        video_pipeline.push(pre_encode_caps_filter);
-        video_pipeline.push(video_queue_2);
-        video_pipeline.extend(encoder_pipeline);
-        video_pipeline.push(video_queue_3.clone());
-
-        self.pipeline.add_and_link(
-            video_pipeline
-                .iter()
-                .collect::<Vec<&gstreamer::Element>>()
-                .as_slice(),
-        )?;
+        self.pipeline
+            .add_and_link(video_branch.iter().collect::<Vec<&Element>>().as_slice())?;
 
         let video_appsink = GStreamerApp::build_app_sink();
-        let video_appsink_ref = video_appsink.upcast_ref::<gstreamer::Element>();
+        let video_appsink_ref = video_appsink.upcast_ref::<Element>();
 
         let last = self
             .pipeline
             .last_element()
             .ok_or_else(|| WayclipError::Video("No last video element".into()))?;
-        self.pipeline.add(video_appsink_ref)?;
 
+        self.pipeline.add(video_appsink_ref)?;
         self.pipeline.link(&last, video_appsink_ref)?;
 
-        // TODO:
-        //self.set_appsink_callbacks(&video_appsink, ContentType::Video)?;
+        video_appsink.set_callbacks(self.build_callback(ring, ContentType::Video));
 
         Ok(())
     }
 
-    fn get_parser_and_filter(&self, codec: &VideoCodec) -> Result<ParserFilter, WayclipError> {
-        match codec {
-            VideoCodec::H264(_) => {
-                let parser = GStreamerElement {
-                    factoryname: codec.get_parser(),
-                    properties: vec![GStreamerElementProperty {
-                        name: "config-interval".into(),
-                        value: GStreamerElementPropertyValue::Typed(DEFAULT_CONFIG_INTERVAL.into()),
-                    }],
-                }
-                .build_element()?;
+    fn setup_audio(
+        &mut self,
+        user_settings: &UserSettings,
+        manager: &PipewireManager,
+        ring: Arc<Mutex<RingBuffer>>,
+    ) -> Result<(), WayclipError> {
+        let audio_branch = AudioBranchBuilder::new(user_settings).build()?;
 
-                let caps = GStreamer::build_caps(GStreamerCapsType::VideoXH264);
-                let caps_filter =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps })?;
+        self.pipeline
+            .add_and_link(audio_branch.1.iter().collect::<Vec<&Element>>().as_slice())?;
 
-                Ok((parser, Some(caps_filter)))
-            }
-            VideoCodec::H265(_) => {
-                let parser = GStreamerElement {
-                    factoryname: codec.get_parser(),
-                    properties: vec![GStreamerElementProperty {
-                        name: "config-interval".into(),
-                        value: GStreamerElementPropertyValue::Typed(DEFAULT_CONFIG_INTERVAL.into()),
-                    }],
-                }
-                .build_element()?;
+        let audio_appsink = GStreamerApp::build_app_sink();
+        let audio_appsink_ref = audio_appsink.upcast_ref::<Element>();
 
-                let caps = GStreamer::build_caps(GStreamerCapsType::VideoXH265);
-                let caps_filter =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps })?;
-                Ok((parser, Some(caps_filter)))
-            }
-            VideoCodec::AV1(_) => {
-                let parser = GStreamerElement {
-                    factoryname: codec.get_parser(),
-                    ..Default::default()
-                }
-                .build_element()?;
+        let last = self
+            .pipeline
+            .last_element()
+            .ok_or_else(|| WayclipError::Audio("No last audio element".into()))?;
 
-                Ok((parser, None))
-            }
-        }
+        self.pipeline.add(audio_appsink_ref)?;
+        self.pipeline.link(&last, audio_appsink_ref)?;
+
+        audio_appsink.set_callbacks(self.build_callback(ring, ContentType::Audio));
+
+        AudioDeviceFactory::setup_devices(&self.pipeline, user_settings, &audio_branch.0, manager)?;
+
+        Ok(())
     }
 
-    fn get_parser_pipeline(
+    fn build_callback(
         &self,
-        pipewire_src: Element,
-        video_queue_1: Element,
-        user_settings: &UserSettings,
-    ) -> Result<(Vec<Element>, Element), WayclipError> {
-        match user_settings.recording.video.codec.get_backend() {
-            CodecType::NVIDIA => {
-                // for nvidia we have DMABuf -> glupload -> GLMemory -> format + colorconvert ->
-                // GLMemory NV12
-                // First capture DMA
-                let caps_1 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: None,
-                    height: None,
-                    framerate: None,
-                    format: None,
-                    memory: Some(VideoXRawMemory::DMABuf),
-                });
-                let caps_filter_1 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_1 })?;
+        ring: Arc<parking_lot::Mutex<RingBuffer>>,
+        content_type: ContentType,
+    ) -> AppSinkCallbacks {
+        AppSinkCallbacks::builder()
+            .new_sample(move |sink| {
+                let sample = sink.pull_sample().map_err(|_| gstreamer::FlowError::Eos)?;
+                let buffer_ref = sample.buffer().ok_or(gstreamer::FlowError::Error)?;
 
-                // Upload DMABuf to GL
-                let gl_upload = GStreamer::build_element(GStreamerElementType::GLUpload)?;
+                let caps = sample.caps().map(|caps| caps.to_owned());
+                let mut pts = buffer_ref.pts().ok_or(gstreamer::FlowError::Error)?;
 
-                // Then make sure everyuthing is GLMemory
-                let caps_2 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: None,
-                    height: None,
-                    framerate: None,
-                    format: None,
-                    memory: Some(VideoXRawMemory::GLMemory),
-                });
-                let caps_filter_2 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_2 })?;
+                let mut ring = ring.lock();
 
-                // GL processing
-                let gl_color_convert_pre =
-                    GStreamer::build_element(GStreamerElementType::GLColorConvert)?;
-                let gl_color_scale = GStreamer::build_element(GStreamerElementType::GLColorScale)?;
+                match content_type {
+                    ContentType::Video => {
+                        ring.video_last_instant = Some(Instant::now());
+                        if ring.awaiting_video_resync {
+                            if let Some(reference) = ring.video_resync_reference {
+                                let gap = ClockTime::from_mseconds(33);
+                                ring.video_pts_offset_ns =
+                                    (reference + gap).nseconds() as i64 - pts.nseconds() as i64;
+                            }
+                            ring.awaiting_video_resync = false;
+                        }
 
-                // More filtering
-                let caps_3 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: Some(user_settings.recording.video.resolution.width as i32),
-                    height: Some(user_settings.recording.video.resolution.height as i32),
-                    framerate: None,
-                    format: Some(VideoXRawFormat::RGBA),
-                    memory: Some(VideoXRawMemory::GLMemory),
-                });
-                let caps_filter_3 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_3 })?;
+                        let shifted = pts.nseconds() as i64 + ring.video_pts_offset_ns;
+                        pts = ClockTime::from_nseconds(shifted.max(0) as u64);
+                    }
+                    ContentType::Audio => {
+                        ring.audio_last_instant = Some(Instant::now());
 
-                // More GL processingg!
-                let gl_color_convert_post =
-                    GStreamer::build_element(GStreamerElementType::GLColorConvert)?;
+                        if ring.awaiting_audio_resync {
+                            if let Some(reference) = ring.audio_resync_reference {
+                                let gap = ClockTime::from_mseconds(20);
+                                ring.audio_pts_offset_ns =
+                                    (reference + gap).nseconds() as i64 - pts.nseconds() as i64;
+                            }
+                            ring.awaiting_audio_resync = false;
+                        }
 
-                let videorate = GStreamer::build_element(GStreamerElementType::VideoRate)?;
-
-                let caps_4 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: None,
-                    height: None,
-                    framerate: Some(gstreamer::Fraction::new(
-                        user_settings.recording.video.fps.0 as i32,
-                        1,
-                    )),
-                    format: Some(VideoXRawFormat::NV12),
-                    memory: Some(VideoXRawMemory::GLMemory),
-                });
-                let caps_filter_4 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_4 })?;
-
-                Ok((
-                    vec![
-                        // pipewire from main pipeline
-                        pipewire_src.clone(),
-                        caps_filter_1,
-                        // queue from main pipeline
-                        video_queue_1.clone(),
-                        gl_upload,
-                        caps_filter_2,
-                        gl_color_convert_pre,
-                        gl_color_scale,
-                        caps_filter_3,
-                        gl_color_convert_post,
-                        videorate,
-                    ],
-                    caps_filter_4,
-                ))
-            }
-            CodecType::VAAPI => {
-                let caps_1 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: None,
-                    height: None,
-                    framerate: None,
-                    format: None,
-                    memory: Some(VideoXRawMemory::DMABuf),
-                });
-                let caps_filter_1 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_1 })?;
-
-                let vapostproc = GStreamer::build_element(GStreamerElementType::VAPostProc)?;
-
-                let caps_2 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: Some(user_settings.recording.video.resolution.width as i32),
-                    height: Some(user_settings.recording.video.resolution.height as i32),
-                    // TODO: VAAPI NO FPS??
-                    framerate: None,
-                    format: Some(VideoXRawFormat::NV12),
-                    memory: Some(VideoXRawMemory::VAMemory),
-                });
-                let caps_filter_2 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_2 })?;
-
-                Ok((
-                    vec![
-                        // pipewire from main pipeline
-                        pipewire_src.clone(),
-                        caps_filter_1,
-                        // queue from main pipeline
-                        video_queue_1.clone(),
-                        vapostproc,
-                    ],
-                    caps_filter_2,
-                ))
-            }
-            CodecType::Software => {
-                let caps_1 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: None,
-                    height: None,
-                    framerate: None,
-                    format: None,
-                    memory: None,
-                });
-                let caps_filter_1 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_1 })?;
-
-                let videoconvert = GStreamer::build_element(GStreamerElementType::VideoConvert)?;
-                let videoscale = GStreamer::build_element(GStreamerElementType::VideoScale)?;
-
-                let caps_2 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: Some(user_settings.recording.video.resolution.width as i32),
-                    height: Some(user_settings.recording.video.resolution.height as i32),
-                    framerate: None,
-                    format: Some(VideoXRawFormat::I420),
-                    memory: None,
-                });
-                let caps_filter_2 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_2 })?;
-
-                let videorate = GStreamer::build_element(GStreamerElementType::VideoRate)?;
-
-                let caps_3 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-                    width: None,
-                    height: None,
-                    framerate: Some(gstreamer::Fraction::new(
-                        user_settings.recording.video.fps.0 as i32,
-                        1,
-                    )),
-                    format: None,
-                    memory: None,
-                });
-                let caps_filter_3 =
-                    GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_3 })?;
-
-                Ok((
-                    vec![
-                        // pipewire from main pipeline
-                        pipewire_src.clone(),
-                        caps_filter_1,
-                        // queue from main pipeline
-                        video_queue_1.clone(),
-                        videoconvert,
-                        videoscale,
-                        caps_filter_2,
-                        videorate,
-                    ],
-                    caps_filter_3,
-                ))
-            }
-        }
-    }
-
-    fn get_encoder_pipeline(
-        &self,
-        user_settings: &UserSettings,
-        parser: Element,
-        parser_caps_filter: Option<Element>,
-    ) -> Result<Vec<Element>, WayclipError> {
-        let codec = &user_settings.recording.video.codec;
-        let bitrate = user_settings.recording.video.bitrate_kbps.0;
-
-        let mut vector = match codec.get_backend() {
-            CodecType::NVIDIA => {
-                let encoder = GStreamerElement {
-                    factoryname: codec.get_encoder(),
-                    properties: vec![
-                        GStreamerElementProperty {
-                            name: "bitrate".into(),
-                            value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "gop-size".into(),
-                            value: GStreamerElementPropertyValue::Typed(DEFAULT_GOP_SIZE.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "rc-mode".into(),
-                            value: GStreamerElementPropertyValue::Serialized("cbr".into()),
-                        },
-                    ],
+                        let shifted = pts.nseconds() as i64 + ring.audio_pts_offset_ns;
+                        pts = ClockTime::from_nseconds(shifted.max(0) as u64);
+                    }
                 }
-                .build_element()?;
 
-                vec![encoder, parser]
-            }
-            CodecType::VAAPI => {
-                let encoder = GStreamerElement {
-                    factoryname: codec.get_encoder(),
-                    properties: vec![
-                        GStreamerElementProperty {
-                            name: "bitrate".into(),
-                            value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "key-int-max".into(),
-                            value: GStreamerElementPropertyValue::Typed(
-                                DEFAULT_KEYFRAME_PERIOD.into(),
-                            ),
-                        },
-                    ],
+                if ring.video_first_pts.is_none()
+                    && let ContentType::Video = content_type
+                {
+                    ring.video_first_pts = Some(pts);
+                    ring.video_start_instant = Some(Instant::now());
+                    log::debug!("First Video PTS Recieved: {}ms", pts.mseconds());
                 }
-                .build_element()?;
 
-                vec![encoder, parser]
-            }
-            CodecType::Software => {
-                let threads = std::thread::available_parallelism()
-                    .map(|n| n.get() as u32)
-                    .unwrap_or(4);
+                if ring.audio_first_pts.is_none()
+                    && let ContentType::Audio = content_type
+                {
+                    ring.audio_first_pts = Some(pts);
+                    ring.audio_start_instant = Some(Instant::now());
+                    log::debug!("First Audio PTS Recieved: {}ms", pts.mseconds());
+                }
 
-                let properties = match codec {
-                    VideoCodec::H264(_) => vec![
-                        GStreamerElementProperty {
-                            name: "bitrate".into(),
-                            value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "key-int-max".into(),
-                            value: GStreamerElementPropertyValue::Typed(
-                                DEFAULT_KEYFRAME_PERIOD.into(),
-                            ),
-                        },
-                        GStreamerElementProperty {
-                            name: "speed-preset".into(),
-                            value: GStreamerElementPropertyValue::Serialized("ultrafast".into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "tune".into(),
-                            value: GStreamerElementPropertyValue::Serialized("zerolatency".into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "threads".into(),
-                            value: GStreamerElementPropertyValue::Typed(threads.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "sliced-threads".into(),
-                            value: GStreamerElementPropertyValue::Typed(true.into()),
-                        },
-                    ],
-                    VideoCodec::H265(_) => vec![
-                        GStreamerElementProperty {
-                            name: "bitrate".into(),
-                            value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "key-int-max".into(),
-                            value: GStreamerElementPropertyValue::Typed(
-                                DEFAULT_KEYFRAME_PERIOD.into(),
-                            ),
-                        },
-                        GStreamerElementProperty {
-                            name: "speed-preset".into(),
-                            value: GStreamerElementPropertyValue::Serialized("ultrafast".into()),
-                        },
-                    ],
-                    // AV1 uses target-bitrate instead
-                    VideoCodec::AV1(_) => vec![GStreamerElementProperty {
-                        name: "target-bitrate".into(),
-                        value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                    }],
+                let dts = buffer_ref.dts();
+                let duration = buffer_ref.duration();
+                let is_keyframe = match content_type {
+                    ContentType::Video => !buffer_ref
+                        .flags()
+                        .contains(gstreamer::BufferFlags::DELTA_UNIT),
+                    ContentType::Audio => true,
                 };
 
-                let encoder = GStreamerElement {
-                    factoryname: codec.get_encoder(),
-                    properties,
+                let frame =
+                    EncodedFrame::new(buffer_ref.to_owned(), pts, dts, duration, is_keyframe);
+
+                if let Some(caps) = caps {
+                    match content_type {
+                        ContentType::Video => {
+                            if ring.video_caps.is_none() {
+                                log::debug!("Stored downstream video caps: {:?}", caps);
+                                ring.video_caps = Some(caps);
+                            }
+                        }
+                        ContentType::Audio => {
+                            if ring.audio_caps.is_none() {
+                                log::debug!("Stored downstream audio caps: {}", caps);
+                                ring.audio_caps = Some(caps)
+                            }
+                        }
+                    }
                 }
-                .build_element()?;
 
-                vec![encoder, parser]
-            }
-        };
+                let res = match content_type {
+                    ContentType::Video => ring.push_video_frame(frame),
+                    ContentType::Audio => ring.push_audio_frame(frame),
+                };
 
-        vector.extend(parser_caps_filter);
-        Ok(vector)
+                match res {
+                    Ok(_) => Ok(gstreamer::FlowSuccess::Ok),
+                    Err(e) => {
+                        log::error!("Pushing {} frames error: {}", content_type, e);
+                        Err(gstreamer::FlowError::Error)
+                    }
+                }
+            })
+            .build()
     }
 }
