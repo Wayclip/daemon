@@ -28,10 +28,10 @@ impl VideoEncoderFactory {
         }
     }
 
-    fn build_nvidia_pipeline(codec: &VideoCodec, bitrate: u64) -> Result<Element, WayclipError> {
-        GStreamerElement {
-            factoryname: codec.get_encoder(),
-            properties: vec![
+    fn build_nvidia_pipeline(codec: &VideoCodec, bitrate: u32) -> Result<Element, WayclipError> {
+        GStreamerElement::new(
+            codec.get_encoder(),
+            vec![
                 GStreamerElementProperty {
                     name: "bitrate".into(),
                     value: GStreamerElementPropertyValue::Typed(bitrate.into()),
@@ -45,14 +45,14 @@ impl VideoEncoderFactory {
                     value: GStreamerElementPropertyValue::Serialized("cbr".into()),
                 },
             ],
-        }
+        )
         .build_element()
     }
 
-    fn build_vaapi_pipeline(codec: &VideoCodec, bitrate: u64) -> Result<Element, WayclipError> {
-        GStreamerElement {
-            factoryname: codec.get_encoder(),
-            properties: vec![
+    fn build_vaapi_pipeline(codec: &VideoCodec, bitrate: u32) -> Result<Element, WayclipError> {
+        GStreamerElement::new(
+            codec.get_encoder(),
+            vec![
                 GStreamerElementProperty {
                     name: "bitrate".into(),
                     value: GStreamerElementPropertyValue::Typed(bitrate.into()),
@@ -62,11 +62,11 @@ impl VideoEncoderFactory {
                     value: GStreamerElementPropertyValue::Typed(DEFAULT_KEYFRAME_PERIOD.into()),
                 },
             ],
-        }
+        )
         .build_element()
     }
 
-    fn build_software_pipeline(codec: &VideoCodec, bitrate: u64) -> Result<Element, WayclipError> {
+    fn build_software_pipeline(codec: &VideoCodec, bitrate: u32) -> Result<Element, WayclipError> {
         let threads = std::thread::available_parallelism()
             .map(|n| n.get() as u32)
             .unwrap_or(4);
@@ -119,10 +119,6 @@ impl VideoEncoderFactory {
             }],
         };
 
-        GStreamerElement {
-            factoryname: codec.get_encoder(),
-            properties,
-        }
-        .build_element()
+        GStreamerElement::new(codec.get_encoder(), properties).build_element()
     }
 }

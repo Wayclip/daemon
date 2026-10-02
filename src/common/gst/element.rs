@@ -5,7 +5,7 @@ use gstreamer::{
 use std::{borrow::Cow, path::PathBuf};
 use wayclip_core::models::error::WayclipError;
 
-use crate::DEFAULT_PREVIEW_BITRATE;
+use crate::common::video::preview::DEFAULT_PREVIEW_BITRATE;
 
 // --- Element Types ---
 
@@ -275,8 +275,8 @@ impl GStreamerElementType {
 /// A custom wrapper around a gstreamer element
 #[derive(Clone, Debug, Default)]
 pub struct GStreamerElement {
-    pub factoryname: Cow<'static, str>,
-    pub properties: Vec<GStreamerElementProperty>,
+    factoryname: Cow<'static, str>,
+    properties: Vec<GStreamerElementProperty>,
 }
 
 impl GStreamerElement {

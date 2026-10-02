@@ -5,22 +5,20 @@ use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 
 use crate::{
     common::misc::discord::{DiscordPresenceManager, DiscordPresenceState},
-    linux::{
-        core::{
-            ipc::commands::IpcCommand,
-            services::{keybinds::KeybindsService, tray::TrayManager},
-            session::CurrentSession,
-        },
-        discovery::Discovery,
+    linux::core::{
+        ipc::commands::IpcCommand,
+        services::{discovery::Discovery, keybinds::KeybindsService, tray::TrayManager},
+        session::CurrentSession,
     },
 };
 
+pub mod discovery;
 pub mod keybinds;
 pub mod tray;
 
 pub struct DaemonServices {
+    pub discovery: Option<Discovery>,
     discord: Option<DiscordPresenceManager>,
-    discovery: Option<Discovery>,
     keybinds: KeybindsService,
     tray: TrayManager,
 
@@ -64,15 +62,16 @@ impl DaemonServices {
         })
     }
 
-    pub fn update(&mut self, current_session: CurrentSession) -> Result<(), WayclipError> {
-        if let Some(ref d) = self.discord {
-            d.set_recording(current_session);
+    pub fn update(&mut self, current_session: &mut CurrentSession) -> Result<(), WayclipError> {
+        if let Some(ref mut disc) = self.discovery {
+            if let Some(new_game) = disc.poll_changed() {
+                log::info!("Game changed to: {:?}", new_game.as_ref().map(|g| &g.name));
+                current_session.game = new_game;
+                if let Some(ref d) = self.discord {
+                    d.set_recording(current_session.clone());
+                }
+            }
         }
-
-        if let Some(ref mut d) = self.discovery {
-            d.discover_game();
-        }
-
         Ok(())
     }
 

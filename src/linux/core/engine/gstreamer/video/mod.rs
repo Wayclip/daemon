@@ -1,5 +1,4 @@
-use gstreamer::prelude::PadExtManual;
-use gstreamer::{Element, prelude::ElementExt};
+use gstreamer::Element;
 use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 
 use crate::linux::core::engine::gstreamer::video::encoder::VideoEncoderFactory;
@@ -43,22 +42,6 @@ impl<'a> VideoBranchBuilder<'a> {
             path: node_id.into(),
             keepalive_ms: 1000 / self.user_settings.recording.video.fps.0 as i32,
         })?;
-
-        #[cfg(debug_assertions)]
-        if let Some(src_pad) = pipewire_src.static_pad("src") {
-            src_pad.add_probe(gstreamer::PadProbeType::EVENT_DOWNSTREAM, |_, info| {
-                if let Some(gstreamer::PadProbeData::Event(ref event)) = info.data
-                    && let gstreamer::EventView::Caps(caps_event) = event.view()
-                {
-                    let caps = caps_event.caps();
-
-                    log::info!("Negotiated initial caps: {:?}", caps);
-
-                    return gstreamer::PadProbeReturn::Remove;
-                }
-                gstreamer::PadProbeReturn::Ok
-            });
-        }
 
         let video_queue_1 = Self::build_queue()?;
         let video_queue_2 = Self::build_queue()?;

@@ -1,21 +1,19 @@
-use gstreamer::{
-    Element,
-    glib::object::ObjectExt,
-    prelude::{ElementExt, ElementExtManual, PadExt},
-};
-use rodio::mixer;
-use wayclip_core::{models::error::WayclipError, settings::UserSettings};
-
 use crate::{
     common::gst::{
         GStreamer, app::DEFAULT_APPSRC_DO_TIMESTAMP, caps::GStreamerCapsType,
         element::GStreamerElementType, pipeline::GStreamerPipeline,
     },
-    linux::{
-        core::engine::pipewire::manager::{PipewireManager, PipewireNodeType},
-        core1::{DEFAULT_AUDIO_CHANNELS, types::DefaultDeviceType},
+    linux::core::engine::{
+        gstreamer::audio::{DEFAULT_AUDIO_CHANNELS, DefaultDeviceType},
+        pipewire::manager::{PipewireManager, PipewireNodeType},
     },
 };
+use gstreamer::{
+    Element,
+    glib::object::ObjectExt,
+    prelude::{ElementExt, ElementExtManual, PadExt},
+};
+use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 
 pub struct AudioDeviceFactory;
 

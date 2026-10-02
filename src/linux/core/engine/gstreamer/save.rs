@@ -7,8 +7,7 @@ use wayclip_core::{
 };
 
 use crate::{
-    PreviewManager,
-    common::video::{SaveManager, ring::RingBuffer},
+    common::video::{SaveManager, preview::PreviewManager, ring::RingBuffer},
     linux::core::session::CurrentSession,
 };
 
@@ -82,11 +81,12 @@ impl SavePipelineFactory {
         let mut parsed_name = Local::now()
             .format(&user_settings.output.name_format)
             .to_string();
-        let game_str = match current_session.game {
-            None => "desktop",
-            Some(g) => g.slug(),
-        };
-        parsed_name = parsed_name.replace("{game}", game_str);
+        let game_str = current_session
+            .game
+            .as_ref()
+            .map(|g| g.slug.clone())
+            .unwrap_or(String::from("desktop"));
+        parsed_name = parsed_name.replace("{game}", &game_str);
 
         log::debug!("Formatted clip name: {}", parsed_name);
 
@@ -149,7 +149,7 @@ impl SavePipelineFactory {
                 clip_output_path,
                 preview_output_path,
                 metadata_output_path,
-                current_session.game,
+                current_session.game.clone(),
                 Some(duration.mseconds()),
                 user_settings.recording.video.bitrate_kbps.clone(),
                 user_settings.recording.video.resolution.clone(),

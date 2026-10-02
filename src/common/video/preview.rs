@@ -40,7 +40,7 @@ impl PreviewManager {
         }
 
         // Initialise our custom pipeline object
-        let mut pipeline = GStreamerPipeline::new();
+        let pipeline = GStreamerPipeline::new();
 
         // filesrc -> decodebin | Will read from disk and auto-detect the correct container to
         // stream the data dynamically
@@ -82,7 +82,8 @@ impl PreviewManager {
             location: output_path.to_path_buf(),
         })?;
 
-        pipeline.add_and_link(&[
+        // 1. Add all elements to the pipeline
+        pipeline.add_many([
             &file_src,
             &decode_bin,
             &video_convert_1,
@@ -95,7 +96,20 @@ impl PreviewManager {
             &file_sink,
         ])?;
 
-        // Acquire pads so we can check on the data
+        // 2. Link upstream: file_src -> decode_bin
+        pipeline.link(&file_src, &decode_bin)?;
+
+        // 3. Link downstream processing chain: video_convert_1 -> ... -> parser
+        pipeline.link(&video_convert_1, &video_scale)?;
+        pipeline.link(&video_scale, &video_convert_2)?;
+        pipeline.link(&video_convert_2, &caps_filter)?;
+        pipeline.link(&caps_filter, &encoder)?;
+        pipeline.link(&encoder, &parser)?;
+
+        // 4. Link decode_bin to video_convert_1 dynamically
+        GStreamer::link_dynamic_pad(&decode_bin, video_convert_1, "video/");
+
+        // Acquire pads for probing and muxing
         let mux_sink_pad = mux.request_pad_simple("video_%u").ok_or_else(|| {
             WayclipError::Remux("Failed to request video pad from matroskamux".into())
         })?;
@@ -110,10 +124,7 @@ impl PreviewManager {
             Arc::new(std::sync::Mutex::new(None));
         let first_pts_clone = first_pts.clone();
 
-        // Pad probbing will allow to dynamically track the PTS of every frame and calculate how
-        // much time has passed. When 5 seconds have passed, we inject an EOS to stop further frames
-        // from progressing and they are dropped. This is how we make sure that the preview is
-        // always 5 seconds long.
+        // Pad probing to enforce 5-second preview length
         parser_pad.add_probe(PadProbeType::BUFFER, move |pad, info| {
             if eos_sent_clone.load(Ordering::SeqCst) {
                 return PadProbeReturn::Drop;
@@ -136,14 +147,11 @@ impl PreviewManager {
             PadProbeReturn::Ok
         });
 
-        // Add all the various links
+        // 5. Link parser -> mux -> file_sink
         parser_pad.link(&mux_sink_pad)?;
-        mux.link(&file_sink)?;
-        file_src.link(&decode_bin)?;
+        pipeline.link(&mux, &file_sink)?;
 
-        GStreamer::link_dynamic_pad(&decode_bin, video_convert_1, "video/");
-
-        // Play and wait for the pipleline to play out
+        // Play and wait for the pipeline to play out
         pipeline.play_and_wait_eos(ClockTime::from_seconds(10), ClockTime::from_seconds(30))?;
 
         // Preview are hardcoded MKV files

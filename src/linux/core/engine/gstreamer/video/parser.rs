@@ -21,11 +21,7 @@ impl VideoParserFactory {
             VideoCodec::H264(_) => Self::build_annex_b_parser(codec, GStreamerCapsType::VideoXH264),
             VideoCodec::H265(_) => Self::build_annex_b_parser(codec, GStreamerCapsType::VideoXH265),
             VideoCodec::AV1(_) => {
-                let parser = GStreamerElement {
-                    factoryname: codec.get_parser(),
-                    ..Default::default()
-                }
-                .build_element()?;
+                let parser = GStreamerElement::new(codec.get_parser(), vec![]).build_element()?;
 
                 Ok((parser, None))
             }
@@ -36,13 +32,13 @@ impl VideoParserFactory {
         codec: &VideoCodec,
         caps_type: GStreamerCapsType,
     ) -> Result<(Element, Option<Element>), WayclipError> {
-        let parser = GStreamerElement {
-            factoryname: codec.get_parser(),
-            properties: vec![GStreamerElementProperty {
+        let parser = GStreamerElement::new(
+            codec.get_parser(),
+            vec![GStreamerElementProperty {
                 name: "config-interval".into(),
                 value: GStreamerElementPropertyValue::Typed(DEFAULT_CONFIG_INTERVAL.into()),
             }],
-        }
+        )
         .build_element()?;
 
         let caps = GStreamer::build_caps(caps_type);

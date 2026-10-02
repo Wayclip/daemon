@@ -129,7 +129,7 @@ impl DiscordPresenceManager {
                             .details(
                                 current_session
                                     .game
-                                    .map(|g| g.to_string())
+                                    .map(|g| g.name.clone())
                                     .unwrap_or(String::from("Desktop")),
                             )
                             .activity_type(ActivityType::Playing)

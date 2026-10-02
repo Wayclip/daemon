@@ -78,8 +78,8 @@ impl CustomDiscordPresenceManager {
         }
 
         // Session-related
-        if let Some(game) = current_session.game {
-            details = details.replace("%game%", &game.to_string());
+        if let Some(ref game) = current_session.game {
+            details = details.replace("%game%", &game.name.clone());
         }
         let video_settings = &current_session.user_settings.recording.video;
         details = details.replace(

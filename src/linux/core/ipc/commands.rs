@@ -11,9 +11,6 @@ pub enum IpcCommand {
         custom_name: Option<String>,
         responder: oneshot::Sender<Result<(), WayclipError>>,
     },
-    RescanGames {
-        responder: oneshot::Sender<Result<(String, f32), WayclipError>>,
-    },
     Shutdown {
         responder: oneshot::Sender<Result<(), WayclipError>>,
     },

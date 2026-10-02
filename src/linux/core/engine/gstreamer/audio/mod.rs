@@ -47,16 +47,16 @@ impl<'a> AudioBranchBuilder<'a> {
         });
         let caps_filter = GStreamer::build_element(GStreamerElementType::CapsFilter { caps })?;
 
-        let encoder = GStreamerElement {
-            factoryname: self.user_settings.recording.audio.codec.get_encoder(),
-            ..Default::default()
-        }
+        let encoder = GStreamerElement::new(
+            self.user_settings.recording.audio.codec.get_encoder(),
+            vec![],
+        )
         .build_element()?;
 
-        let parser = GStreamerElement {
-            factoryname: self.user_settings.recording.audio.codec.get_parser(),
-            ..Default::default()
-        }
+        let parser = GStreamerElement::new(
+            self.user_settings.recording.audio.codec.get_parser(),
+            vec![],
+        )
         .build_element()?;
 
         let queue = GStreamer::build_element(GStreamerElementType::AudioQueue)?;

@@ -69,20 +69,6 @@ impl DaemonServer {
             .map_err(|e| fdo::Error::Failed(e.to_string()))
     }
 
-    #[zbus(name = "RescanGames")]
-    async fn rescan_games(&self) -> fdo::Result<(String, f32)> {
-        let (sender, receiver) = oneshot::channel();
-        self.command_sender
-            .send(IpcCommand::RescanGames { responder: sender })
-            .await
-            .map_err(|_| fdo::Error::Failed("Daemon core inactive".into()))?;
-
-        receiver
-            .await
-            .map_err(|_| fdo::Error::Failed("Core failed to respond".into()))?
-            .map_err(|e| fdo::Error::Failed(e.to_string()))
-    }
-
     #[zbus(name = "Shutdown")]
     async fn shutdown(&self) -> fdo::Result<()> {
         let (sender, receiver) = oneshot::channel();

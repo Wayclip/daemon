@@ -17,9 +17,9 @@ pub struct GStreamerPipeline {
 }
 
 pub struct GetStateResult {
-    current: State,
-    pending: State,
-    success: StateChangeSuccess,
+    pub current: State,
+    pub pending: State,
+    pub success: StateChangeSuccess,
 }
 
 impl GStreamerPipeline {
