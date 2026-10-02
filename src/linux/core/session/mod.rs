@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use url::Url;
-use wayclip_core::{models::clips::games::ClipsGames, settings::UserSettings};
+use wayclip_core::{models::clips::games::Game, settings::UserSettings};
 
 use crate::common::misc::extra::WayclipTime;
 
@@ -11,7 +11,7 @@ use crate::common::misc::extra::WayclipTime;
 /// discord status (if enable), clip titles and more
 #[derive(Clone, Debug)]
 pub struct CurrentSession {
-    pub game: Option<ClipsGames>,
+    pub game: Option<Game>,
     pub clips: u32,
     pub last_clip: Option<LastClipInfo>,
     pub started_at: DateTime<Utc>,
@@ -53,7 +53,7 @@ impl CurrentSession {
 
     // TODO:
     // In the future, consider making this method fetch the UserSessionInfo by itself?
-    pub async fn tick(&mut self, game: Option<ClipsGames>, user_session: Option<UserSessionInfo>) {
+    pub async fn tick(&mut self, game: Option<Game>, user_session: Option<UserSessionInfo>) {
         self.game = game;
         self.user_session = user_session;
     }

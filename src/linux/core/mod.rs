@@ -103,7 +103,7 @@ impl DaemonCore {
     /// Stop is our new graceful shutdown procedure, which handles properly stopping
     pub async fn stop(&mut self) -> Result<(), WayclipError> {
         // Mark as deactivating
-        self.update_status(DaemonStatus::Deactivating);
+        self.update_status(DaemonStatus::Deactivating)?;
 
         // stop the recording engine, close session and portal
         self.engine.stop().await?;
@@ -131,14 +131,14 @@ impl DaemonCore {
         // Then, attempt to create a new connection so that processes can communicate with us
         self.ipc.connect().await?;
 
-        self.engine
-            .setup(&self.current_session.user_settings)
-            .await?;
-
         self.services.start_services(
             &self.current_session.user_settings,
             &self.ipc.command_sender,
         )?;
+
+        self.engine
+            .setup(&self.current_session.user_settings)
+            .await?;
 
         // ...start watcher + recovery
 
@@ -172,7 +172,7 @@ impl DaemonCore {
                 }
 
                 _ = tick.tick() => {
-                    self.services.update(self.current_session.clone())?;
+                    self.services.update(&mut self.current_session)?;
                 }
 
                 Some(ipc_command) = self.ipc.recieve() => {
@@ -230,7 +230,6 @@ impl DaemonCore {
                     })?;
                 }
             }
-            _ => (),
         }
 
         Ok(())

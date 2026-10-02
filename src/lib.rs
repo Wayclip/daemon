@@ -1,8 +1,7 @@
-pub(crate) mod common;
-pub use common::video::preview::*;
+pub mod common;
 
 #[cfg(feature = "linux")]
-pub(crate) mod linux;
+pub mod linux;
 
 #[cfg(feature = "windows")]
 pub(crate) mod windows;
