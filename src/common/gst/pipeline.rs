@@ -1,12 +1,14 @@
-use std::sync::{Arc, Mutex};
-
 use gstreamer::{
     ClockTime, Element, MessageView, State, StateChangeSuccess,
     glib::object::{Cast, IsA},
     prelude::{ElementExt, ElementExtManual, GstBinExt, GstObjectExt},
 };
 use gstreamer_gl::{GL_DISPLAY_CONTEXT_TYPE, prelude::ContextGLExt};
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use wayclip_core::models::error::WayclipError;
+
+use crate::common::gst::bus::{BusWatcher, CoreEvent};
 
 #[derive(Clone, Debug)]
 pub struct GStreamerPipeline {
@@ -29,6 +31,18 @@ impl GStreamerPipeline {
             pipeline: gstreamer::Pipeline::new(),
             tracked_elements: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    pub fn spawn_watcher(
+        &self,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<BusWatcher, WayclipError> {
+        Ok(BusWatcher::spawn(
+            self.pipeline
+                .bus()
+                .ok_or_else(|| WayclipError::NotFound("No bus found".into()))?,
+            sender,
+        ))
     }
 
     pub fn raw(&self) -> &gstreamer::Pipeline {

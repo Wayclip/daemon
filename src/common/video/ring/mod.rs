@@ -2,7 +2,7 @@ use crate::common::video::ring::data::{EncodedFrame, SaveData};
 use gstreamer::ClockTime;
 use std::{
     collections::VecDeque,
-    io::{self, IsTerminal},
+    io::{self, IsTerminal, Write},
     time::Instant,
 };
 use wayclip_core::models::error::WayclipError;
@@ -135,7 +135,7 @@ impl RingBuffer {
 
         // write to same line
         eprint!(
-            "\r\x1b[2K{:<9} | Buf: {:>4.1}/{:>4.1}s ({:>5.1} MB | V:{:<4} A:{:<4}) | {:>4.1} fps | A/V: {:>7} | In: {} {:>5.1} KB",
+            "\r{:<9} | Buf: {:>4.1}/{:>4.1}s ({:>5.1} MB | V:{:<4} A:{:<4}) | {:>4.1} fps | A/V: {:>7} | In: {} {:>5.1} KB\x1b[K",
             res,
             buf_s,
             max_s,
@@ -147,6 +147,7 @@ impl RingBuffer {
             kf_tag,
             size_kb
         );
+        let _ = io::stderr().flush();
     }
 
     // Same method as for video, but instead we are handing auido frames. Both call same

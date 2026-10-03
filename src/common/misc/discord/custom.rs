@@ -1,6 +1,6 @@
 use crate::{
     common::misc::extra::{FormatMode, WayclipTime, WayclipTimeTimezone},
-    linux::core::session::CurrentSession,
+    linux::session::CurrentSession,
 };
 use discord_rich_presence::activity::{Activity, ActivityType};
 use wayclip_core::settings::discovery::{
@@ -31,16 +31,16 @@ impl From<CustomDiscordRichPresence> for CustomDiscordPresenceManager {
 }
 
 impl CustomDiscordPresenceManager {
-    pub fn new(state: String, details: String, activity_type: ActivityType) -> Self {
-        Self {
-            state,
-            details,
-            activity_type,
-        }
-    }
+    //pub fn new(state: String, details: String, activity_type: ActivityType) -> Self {
+    //    Self {
+    //        state,
+    //        details,
+    //        activity_type,
+    //    }
+    //}
 
     /// Method to build the activity struct using the custom configuration
-    pub fn get_activity(&self, current_session: &CurrentSession) -> Activity {
+    pub fn get_activity(&self, current_session: &CurrentSession) -> Activity<'_> {
         Activity::new()
             .state(self.state.clone())
             .details(self.parse_details(current_session))
