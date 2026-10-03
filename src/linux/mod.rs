@@ -148,7 +148,7 @@ impl DaemonCore {
         let services_res = self.services.stop_services().await;
 
         // For debug in ring buffer
-        if !std::io::stderr().is_terminal() {
+        if std::io::stderr().is_terminal() {
             eprint!("\r\x1b[2K");
         }
 
@@ -225,7 +225,7 @@ impl DaemonCore {
                             let _ = NotificationManager::send_event(
                                 NotificationEvent::SaveSuccess,
                                 &self.current_session.user_settings.notification,
-                                String::default(),
+                                name.to_owned(),
                             );
                         }
                         Err(e) => {

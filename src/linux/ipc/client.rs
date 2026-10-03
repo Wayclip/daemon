@@ -79,8 +79,8 @@ pub enum ShutdownReason {
 pub trait Daemon {
     async fn get_status(&self) -> zbus::fdo::Result<DaemonStatus>;
     async fn save_clip(&self) -> zbus::fdo::Result<String>;
-    async fn save_clip_with_custom_name(&self, forced_name: String) -> zbus::fdo::Result<()>;
-    async fn rescan_games(&self) -> zbus::fdo::Result<(String, f32)>;
+    async fn save_clip_with_custom_name(&self, forced_name: String) -> zbus::fdo::Result<String>;
+    async fn shutdown(&self) -> zbus::fdo::Result<()>;
 }
 
 #[proxy(

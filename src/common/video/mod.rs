@@ -96,6 +96,14 @@ impl DataStream {
     }
 }
 
+// We need this so that if pipeline goes of context, it sets state back to Null
+struct NullOnDrop(gstreamer::Pipeline);
+impl Drop for NullOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.set_state(gstreamer::State::Null);
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SaveManager;
 
@@ -124,6 +132,7 @@ impl SaveManager {
 
         // Intialise our new pipeline object
         let pipeline = GStreamerPipeline::new();
+        let _guard = NullOnDrop(pipeline.raw().clone());
 
         // Extract the base pts & offset - we will use these as anchor points to make sure video,
         // audio and the real timestamps are synced properly
@@ -266,10 +275,21 @@ impl SaveManager {
             handles.push(GStreamerApp::push_frames(stream.0, stream.1));
         }
 
-        for handle in handles {
-            handle
-                .join()
-                .map_err(|_| WayclipError::Remux("Frame pushing thread panicked".into()))??;
+        let mut first: Option<WayclipError> = None;
+        for h in handles {
+            match h.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    first.get_or_insert(e);
+                }
+                Err(_) => {
+                    first.get_or_insert(WayclipError::Remux("push thread panicked".into()));
+                }
+            }
+        }
+
+        if let Some(e) = first {
+            return Err(e);
         }
 
         pipeline.wait_eos(ClockTime::from_seconds(DEFAULT_VIDEO_SAVE_TIMEOUT))

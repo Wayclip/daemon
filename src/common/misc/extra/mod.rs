@@ -53,6 +53,8 @@ impl FormatMode {
                     format!("{days}d {hours}h")
                 } else if hours > 0 {
                     format!("{hours}h {minutes}m")
+                } else if minutes > 0 {
+                    format!("{minutes}m {seconds}s")
                 } else {
                     format!("{seconds}s")
                 }

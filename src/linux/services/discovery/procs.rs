@@ -56,15 +56,6 @@ impl Scanner {
                 log::trace!("classify({pid}) failed: {e}");
                 None
             });
-            if let Some(ref g) = game {
-                if g.name == "Spellcraft" {
-                    log::warn!(
-                        "Classified PID {} as Spellcraft; exe={:?}",
-                        pid,
-                        fs::read_link(format!("/proc/{}/exe", pid)).ok(),
-                    );
-                }
-            }
             self.seen.insert(pid, Verdict { start, tries, game });
         }
 

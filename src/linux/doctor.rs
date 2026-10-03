@@ -263,24 +263,28 @@ impl Doctor {
         let audio_encoder = self.audio_codec.get_encoder();
 
         let element_checks: Vec<(&str, bool)> = vec![
-            // default ones
             ("pipewiresrc", true),
             ("queue", true),
             ("capsfilter", true),
             ("appsink", true),
+            ("appsrc", true),
             ("videoconvert", true),
             ("videoscale", true),
             ("videorate", true),
-            // depends on config
+            ("audiomixer", true),
+            ("audioconvert", true),
+            ("audioresample", true),
+            ("decodebin", true),
+            ("filesrc", true),
+            ("filesink", true),
+            ("x264enc", true),
+            ("h264parse", true),
+            ("matroskamux", true),
             (video_parser.as_ref(), true),
             (video_encoder.as_ref(), true),
             (video_mux.as_ref(), true),
             (audio_parser.as_ref(), true),
             (audio_encoder.as_ref(), true),
-            // optional
-            ("nvh264enc", false),
-            ("vah264enc", false),
-            ("x264enc", false),
         ];
 
         element_checks

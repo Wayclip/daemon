@@ -62,7 +62,7 @@ impl DaemonServices {
         if let Some(ref mut disc) = self.discovery {
             if let Some(new_game) = disc.poll_changed() {
                 log::info!("Game changed to: {:?}", new_game.as_ref().map(|g| &g.name));
-                current_session.game = new_game;
+                current_session.tick(new_game, None);
                 if let Some(ref d) = self.discord {
                     d.set_recording(current_session.clone());
                 }

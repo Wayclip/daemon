@@ -49,7 +49,7 @@ The runtime-required `gstreamer` packages can be checked via the `wayclip-cli` b
 
 | Feature Flag | Description                                                                           | Default |
 | ------------ | ------------------------------------------------------------------------------------- | ------- |
-| `linux`      | Enables the `linux` module, enabling use of packages line `zbus`, `pipewire` and more | No      |
+| `linux`      | Enables the `linux` module, enabling use of packages line `zbus`, `pipewire` and more | Yes     |
 | `windows`    | Not currently avaialable                                                              | No      |
 
 > _Note: `linux` and `windows` feature flags are mutually exclusive._

@@ -20,7 +20,9 @@ impl Discovery {
         Ok(Self {
             scanner: Scanner::new()?,
             current_game: None,
-            last_scan: Instant::now() - Duration::from_secs(10),
+            last_scan: Instant::now()
+                .checked_sub(Duration::from_secs(10))
+                .unwrap_or_else(Instant::now),
         })
     }
 

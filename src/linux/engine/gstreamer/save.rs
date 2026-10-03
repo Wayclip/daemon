@@ -1,4 +1,5 @@
 use chrono::Local;
+use gstreamer::ClockTime;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -19,8 +20,6 @@ pub struct SaveDone {
 
 pub struct SavePipelineFactory;
 
-const DEFAULT_MIN_FRAMES_FOR_SAVE: usize = 100;
-
 impl SavePipelineFactory {
     pub async fn save(
         current_session: &CurrentSession,
@@ -28,15 +27,16 @@ impl SavePipelineFactory {
         ring: Arc<Mutex<RingBuffer>>,
     ) -> Result<String, WayclipError> {
         let user_settings = &current_session.user_settings;
-        let (saved_data, frame_count) = {
+        let saved_data = {
             let ring = ring.lock();
-            (ring.get_snapshot()?, ring.video_frames.len())
+            ring.get_snapshot()?
         };
 
-        if frame_count < DEFAULT_MIN_FRAMES_FOR_SAVE {
+        let min =
+            ClockTime::from_seconds(2).min(user_settings.recording.video.get_max_duration() / 2);
+        if saved_data.duration < min || saved_data.video_frames.len() < 2 {
             let message = format!(
-                "Cannot save clip: Not enough frames in buffer yet ({}/{} frames). Stream might be lagging.",
-                frame_count, DEFAULT_MIN_FRAMES_FOR_SAVE
+                "Cannot save clip: Not enough frames in buffer yet. Stream might be lagging.",
             );
             log::warn!("{}", message);
             return Err(WayclipError::Ring(message.into()));
