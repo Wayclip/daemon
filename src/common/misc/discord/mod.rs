@@ -1,10 +1,10 @@
 use crate::{
     common::misc::discord::custom::CustomDiscordPresenceManager,
-    linux::core::session::{CurrentSession, LastClipInfo, UserSessionInfo},
+    linux::session::{CurrentSession, LastClipInfo, UserSessionInfo},
 };
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
-    activity::{Activity, ActivityType, Button, Timestamps},
+    activity::{Activity, ActivityType, Assets, Button, Timestamps},
 };
 use std::sync::mpsc;
 
@@ -49,22 +49,22 @@ pub enum DiscordPresenceState {
 ///  - ActivityType
 pub struct DiscordPresenceManager {
     tx: mpsc::Sender<PresenceCommand>,
-    pub state: DiscordPresenceState,
 }
 
 impl DiscordPresenceManager {
     fn set_activity(client: &mut Option<DiscordIpcClient>, activity: Activity) {
         if client.is_none() {
-            log::debug!("Connecting to Discord IPC");
-
-            let mut new_client = DiscordIpcClient::new(WAYCLIP_DISCORD_CLIENT_ID);
-
-            if let Err(error) = new_client.connect() {
-                log::debug!("Discord is not running or IPC connection failed: {error}");
+            let mut c = DiscordIpcClient::new(WAYCLIP_DISCORD_CLIENT_ID);
+            match c.connect() {
+                Ok(()) => {
+                    log::debug!("Connected to Discord IPC");
+                    *client = Some(c);
+                }
+                Err(e) => {
+                    log::debug!("Discord not available: {e}");
+                    return;
+                }
             }
-
-            *client = Some(new_client);
-            log::debug!("Connected to Discord IPC");
         }
 
         let set_activity_failed = if let Some(discord) = client.as_mut() {
@@ -118,56 +118,69 @@ impl DiscordPresenceManager {
         let (tx, rx) = mpsc::channel::<PresenceCommand>();
 
         let state_clone = state.clone();
-        tokio::spawn(async move {
-            let mut client: Option<DiscordIpcClient> = None;
+        std::thread::Builder::new()
+            .name("discord-presence".into())
+            .spawn(move || {
+                let mut client: Option<DiscordIpcClient> = None;
+                for command in rx {
+                    let activity = match command {
+                        PresenceCommand::RecordingEvent { current_session } => match state_clone {
+                            DiscordPresenceState::Default => {
+                                let mut activity = Activity::new().state("Recording");
 
-            for command in rx {
-                let activity = match command {
-                    PresenceCommand::RecordingEvent { current_session } => match state_clone {
-                        DiscordPresenceState::Default => Activity::new()
-                            .state("Recording")
-                            .details(
-                                current_session
-                                    .game
-                                    .map(|g| g.name.clone())
-                                    .unwrap_or(String::from("Desktop")),
-                            )
-                            .activity_type(ActivityType::Playing)
-                            // TODO: A way to disable promo
-                            .buttons(Self::get_recording_buttons(
-                                true,
-                                current_session.user_session,
-                            ))
-                            .timestamps(
-                                Timestamps::new().start(current_session.started_at.timestamp()),
-                            ),
-                        DiscordPresenceState::Custom(ref custom_config) => {
-                            custom_config.get_activity(&current_session)
-                        }
-                    },
-                    PresenceCommand::SavingEvent { current_session } => match state_clone {
-                        DiscordPresenceState::Default => Activity::new()
-                            .state("Saved clip")
-                            .details("Just saved a new clip using Wayclip!")
-                            .activity_type(ActivityType::Playing)
-                            .buttons(Self::get_saved_buttons(current_session.last_clip)),
-                        DiscordPresenceState::Custom(ref custom_config) => {
-                            custom_config.get_activity(&current_session)
-                        }
-                    },
-                };
+                                if let Some(g) = current_session.game.clone() {
+                                    log::info!("{:?}", g);
+                                    let mut assets = Assets::new().small_text(g.name.clone());
+                                    if let Some(icon) = g.icon_url.clone() {
+                                        assets = assets.small_image(icon)
+                                    }
+                                    activity = activity.assets(assets);
+                                }
 
-                Self::set_activity(&mut client, activity);
-            }
+                                activity = activity
+                                    .details(
+                                        current_session
+                                            .game
+                                            .map(|g| g.name.clone())
+                                            .unwrap_or(String::from("Desktop")),
+                                    )
+                                    .activity_type(ActivityType::Playing)
+                                    // TODO: A way to disable promo
+                                    .buttons(Self::get_recording_buttons(
+                                        true,
+                                        current_session.user_session,
+                                    ))
+                                    .timestamps(
+                                        Timestamps::new()
+                                            .start(current_session.started_at.timestamp()),
+                                    );
+                                activity
+                            }
+                            DiscordPresenceState::Custom(ref custom_config) => {
+                                custom_config.get_activity(&current_session)
+                            }
+                        },
+                        PresenceCommand::SavingEvent { current_session } => match state_clone {
+                            DiscordPresenceState::Default => Activity::new()
+                                .state("Saved clip")
+                                .details("Just saved a new clip using Wayclip!")
+                                .activity_type(ActivityType::Playing)
+                                .buttons(Self::get_saved_buttons(current_session.last_clip)),
+                            DiscordPresenceState::Custom(ref custom_config) => {
+                                custom_config.get_activity(&current_session)
+                            }
+                        },
+                    };
+                    Self::set_activity(&mut client, activity);
+                }
 
-            if let Some(mut discord) = client.take()
-                && let Err(error) = discord.close()
-            {
-                log::debug!("Failed to close Discord IPC connection: {error}");
-            }
-        });
+                if let Some(mut c) = client.take() {
+                    let _ = c.close();
+                }
+            })
+            .expect("spawn discord thread");
 
-        Self { tx, state }
+        Self { tx }
     }
 
     pub fn set_recording(&self, current_session: CurrentSession) {

@@ -6,6 +6,7 @@ use gstreamer::{
 use wayclip_core::models::error::WayclipError;
 
 pub mod app;
+pub mod bus;
 pub mod caps;
 pub mod element;
 pub mod pipeline;
