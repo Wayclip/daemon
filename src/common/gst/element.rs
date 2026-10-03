@@ -69,99 +69,75 @@ impl GStreamerElementType {
     /// any additional properties
     pub fn get_element(&self) -> GStreamerElement {
         match self {
-            Self::AudioMixer => GStreamerElement {
-                factoryname: "audiomixer".into(),
-                properties: vec![
-                    GStreamerElementProperty {
-                        name: "start-time-selection".into(),
-                        value: GStreamerElementPropertyValue::Serialized("zero".into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "ignore-inactive-pads".into(),
-                        value: GStreamerElementPropertyValue::Typed(true.into()),
-                    },
+            Self::AudioMixer => GStreamerElement::new(
+                "audiomixer",
+                vec![
+                    GStreamerElementProperty::new(
+                        "start-time-selection",
+                        GStreamerElementPropertyValue::from_str("zero"),
+                    ),
+                    GStreamerElementProperty::new(
+                        "ignore-inactive-pads",
+                        GStreamerElementPropertyValue::typed(true),
+                    ),
                 ],
-            },
-            Self::VAPostProc => GStreamerElement {
-                factoryname: "vapostproc".into(),
-                ..Default::default()
-            },
-            Self::VideoRate => GStreamerElement {
-                factoryname: "videorate".into(),
-                ..Default::default()
-            },
-            Self::GLColorScale => GStreamerElement {
-                factoryname: "glcolorscale".into(),
-                ..Default::default()
-            },
-            Self::GLColorConvert => GStreamerElement {
-                factoryname: "glcolorconvert".into(),
-                ..Default::default()
-            },
-            Self::GLUpload => GStreamerElement {
-                factoryname: "glupload".into(),
-                ..Default::default()
-            },
+            ),
+            Self::VAPostProc => GStreamerElement::new("vapostproc", vec![]),
+            Self::VideoRate => GStreamerElement::new("videorate", vec![]),
+            Self::GLColorScale => GStreamerElement::new("glcolorscale", vec![]),
+            Self::GLColorConvert => GStreamerElement::new("glcolorconvert", vec![]),
+            Self::GLUpload => GStreamerElement::new("glupload", vec![]),
             Self::VideoQueue {
                 buffers,
                 bytes,
                 time,
                 leaky,
-            } => GStreamerElement {
-                factoryname: "queue".into(),
-                properties: vec![
-                    GStreamerElementProperty {
-                        name: "max-size-buffers".into(),
-                        value: GStreamerElementPropertyValue::Typed(buffers.into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "max-size-bytes".into(),
-                        value: GStreamerElementPropertyValue::Typed(bytes.into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "max-size-time".into(),
-                        value: GStreamerElementPropertyValue::Typed(time.into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "leaky".into(),
-                        value: GStreamerElementPropertyValue::Serialized(leaky.to_owned()),
-                    },
+            } => GStreamerElement::new(
+                "queue",
+                vec![
+                    GStreamerElementProperty::new(
+                        "max-size-buffers",
+                        GStreamerElementPropertyValue::typed(*buffers),
+                    ),
+                    GStreamerElementProperty::new(
+                        "max-size-bytes",
+                        GStreamerElementPropertyValue::typed(*bytes),
+                    ),
+                    GStreamerElementProperty::new(
+                        "max-size-time",
+                        GStreamerElementPropertyValue::typed(*time),
+                    ),
+                    GStreamerElementProperty::new(
+                        "leaky",
+                        GStreamerElementPropertyValue::from_str(leaky.clone()),
+                    ),
                 ],
-            },
-            Self::AudioConvert => GStreamerElement {
-                factoryname: "audioconvert".into(),
-                ..Default::default()
-            },
-            Self::AudioResample => GStreamerElement {
-                factoryname: "audioresample".into(),
-                ..Default::default()
-            },
+            ),
+            Self::AudioConvert => GStreamerElement::new("audioconvert", vec![]),
+            Self::AudioResample => GStreamerElement::new("audioresample", vec![]),
             Self::VideoPipewireSrc {
                 do_timestamp,
                 fd,
                 path,
                 keepalive_ms,
-            } => GStreamerElement {
-                factoryname: "pipewiresrc".into(),
-                properties: vec![
-                    GStreamerElementProperty {
-                        name: "do-timestamp".into(),
-                        value: GStreamerElementPropertyValue::Typed(do_timestamp.into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "fd".into(),
-                        value: GStreamerElementPropertyValue::Typed(fd.into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "path".into(),
-                        value: GStreamerElementPropertyValue::Typed(path.to_value()),
-                    },
-                    GStreamerElementProperty {
-                        name: "keepalive-time".into(),
-                        value: GStreamerElementPropertyValue::Typed(keepalive_ms.into()),
-                    },
+            } => GStreamerElement::new(
+                "pipewiresrc",
+                vec![
+                    GStreamerElementProperty::new(
+                        "do-timestamp",
+                        GStreamerElementPropertyValue::typed(*do_timestamp),
+                    ),
+                    GStreamerElementProperty::new("fd", GStreamerElementPropertyValue::typed(*fd)),
+                    GStreamerElementProperty::new(
+                        "path",
+                        GStreamerElementPropertyValue::typed(path.to_value()),
+                    ),
+                    GStreamerElementProperty::new(
+                        "keepalive-time",
+                        GStreamerElementPropertyValue::typed(*keepalive_ms),
+                    ),
                 ],
-            },
+            ),
             Self::AudioPipewireSrc {
                 do_timestamp,
                 target_object,
@@ -171,101 +147,77 @@ impl GStreamerElementType {
                     .field("node.always-process", true)
                     .field("stream.capture.sink", sink);
 
-                GStreamerElement {
-                    factoryname: "pipewiresrc".into(),
-                    properties: vec![
-                        GStreamerElementProperty {
-                            name: "do-timestamp".into(),
-                            value: GStreamerElementPropertyValue::Typed(do_timestamp.into()),
-                        },
-                        GStreamerElementProperty {
-                            name: "target-object".into(),
-                            value: GStreamerElementPropertyValue::Typed(target_object.to_value()),
-                        },
-                        GStreamerElementProperty {
-                            name: "stream-properties".into(),
-                            value: GStreamerElementPropertyValue::Typed(structure.build().into()),
-                        },
+                GStreamerElement::new(
+                    "pipewiresrc",
+                    vec![
+                        GStreamerElementProperty::new(
+                            "do-timestamp",
+                            GStreamerElementPropertyValue::typed(*do_timestamp),
+                        ),
+                        GStreamerElementProperty::new(
+                            "target-object",
+                            GStreamerElementPropertyValue::typed(target_object.to_value()),
+                        ),
+                        GStreamerElementProperty::new(
+                            "stream-properties",
+                            GStreamerElementPropertyValue::typed(structure.build()),
+                        ),
                     ],
-                }
+                )
             }
-            Self::MatroskaMux => GStreamerElement {
-                factoryname: "matroskamux".into(),
-                properties: vec![GStreamerElementProperty {
-                    name: "streamable".into(),
-                    value: GStreamerElementPropertyValue::Typed(true.into()),
-                }],
-            },
-            Self::H264Parse => GStreamerElement {
-                factoryname: "h264parse".into(),
-                ..Default::default()
-            },
-            Self::X264Enc => GStreamerElement {
-                factoryname: "x264enc".into(),
-                properties: vec![
-                    GStreamerElementProperty {
-                        name: "tune".into(),
-                        value: GStreamerElementPropertyValue::Serialized("zerolatency".into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "speed-preset".into(),
-                        value: GStreamerElementPropertyValue::Serialized("veryfast".into()),
-                    },
-                    GStreamerElementProperty {
-                        name: "bitrate".into(),
-                        value: GStreamerElementPropertyValue::Typed(DEFAULT_PREVIEW_BITRATE.into()),
-                    },
+            Self::MatroskaMux => GStreamerElement::new(
+                "matroskamux",
+                vec![GStreamerElementProperty::new(
+                    "streamable",
+                    GStreamerElementPropertyValue::typed(true),
+                )],
+            ),
+            Self::H264Parse => GStreamerElement::new("h264parse", vec![]),
+            Self::X264Enc => GStreamerElement::new(
+                "x264enc",
+                vec![
+                    GStreamerElementProperty::new(
+                        "tune",
+                        GStreamerElementPropertyValue::from_str("zerolatency"),
+                    ),
+                    GStreamerElementProperty::new(
+                        "speed-preset",
+                        GStreamerElementPropertyValue::from_str("veryfast"),
+                    ),
+                    GStreamerElementProperty::new(
+                        "bitrate",
+                        GStreamerElementPropertyValue::typed(DEFAULT_PREVIEW_BITRATE),
+                    ),
                 ],
-            },
-            Self::DecodeBin => GStreamerElement {
-                factoryname: "decodebin".into(),
-                ..Default::default()
-            },
-            Self::VideoConvert => GStreamerElement {
-                factoryname: "videoconvert".into(),
-                ..Default::default()
-            },
-            Self::VideoScale => GStreamerElement {
-                factoryname: "videoscale".into(),
-                ..Default::default()
-            },
-            Self::SaveMux { mux } => GStreamerElement {
-                factoryname: mux.clone(),
-                ..Default::default()
-            },
-            Self::CapsFilter { caps } => GStreamerElement {
-                factoryname: "capsfilter".into(),
-                properties: vec![GStreamerElementProperty {
-                    name: "caps".into(),
-                    value: GStreamerElementPropertyValue::Typed(caps.into()),
-                }],
-            },
-            Self::FileSink { location } => GStreamerElement {
-                factoryname: "filesink".into(),
-                properties: vec![GStreamerElementProperty {
-                    name: "location".into(),
-                    value: GStreamerElementPropertyValue::Typed(location.to_value()),
-                }],
-            },
-            Self::SaveVideoParser { parser } => GStreamerElement {
-                factoryname: parser.clone(),
-                ..Default::default()
-            },
-            Self::SaveAudioParser { parser } => GStreamerElement {
-                factoryname: parser.clone(),
-                ..Default::default()
-            },
-            Self::AudioQueue => GStreamerElement {
-                factoryname: "queue".into(),
-                ..Default::default()
-            },
-            Self::FileSource { location } => GStreamerElement {
-                factoryname: "filesrc".into(),
-                properties: vec![GStreamerElementProperty {
-                    name: "location".into(),
-                    value: GStreamerElementPropertyValue::Typed(location.to_value()),
-                }],
-            },
+            ),
+            Self::DecodeBin => GStreamerElement::new("decodebin", vec![]),
+            Self::VideoConvert => GStreamerElement::new("videoconvert", vec![]),
+            Self::VideoScale => GStreamerElement::new("videoscale", vec![]),
+            Self::SaveMux { mux } => GStreamerElement::new(mux.clone(), vec![]),
+            Self::CapsFilter { caps } => GStreamerElement::new(
+                "capsfilter",
+                vec![GStreamerElementProperty::new(
+                    "caps",
+                    GStreamerElementPropertyValue::typed(caps.clone()),
+                )],
+            ),
+            Self::FileSink { location } => GStreamerElement::new(
+                "filesink",
+                vec![GStreamerElementProperty::new(
+                    "location",
+                    GStreamerElementPropertyValue::typed(location.to_value()),
+                )],
+            ),
+            Self::SaveVideoParser { parser } => GStreamerElement::new(parser.clone(), vec![]),
+            Self::SaveAudioParser { parser } => GStreamerElement::new(parser.clone(), vec![]),
+            Self::AudioQueue => GStreamerElement::new("queue", vec![]),
+            Self::FileSource { location } => GStreamerElement::new(
+                "filesrc",
+                vec![GStreamerElementProperty::new(
+                    "location",
+                    GStreamerElementPropertyValue::typed(location.to_value()),
+                )],
+            ),
         }
     }
 }
@@ -316,6 +268,18 @@ pub struct GStreamerElementProperty {
     pub value: GStreamerElementPropertyValue,
 }
 
+impl GStreamerElementProperty {
+    pub fn new<N>(name: N, value: GStreamerElementPropertyValue) -> Self
+    where
+        N: Into<Cow<'static, str>>,
+    {
+        Self {
+            name: name.into(),
+            value,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum GStreamerElementPropertyValue {
     Typed(glib::Value),
@@ -329,17 +293,5 @@ impl GStreamerElementPropertyValue {
 
     pub fn from_str<V: Into<Cow<'static, str>>>(value: V) -> Self {
         Self::Serialized(value.into())
-    }
-}
-
-impl GStreamerElementProperty {
-    fn new<N>(name: N, value: GStreamerElementPropertyValue) -> Self
-    where
-        N: Into<Cow<'static, str>>,
-    {
-        Self {
-            name: name.into(),
-            value,
-        }
     }
 }

@@ -12,14 +12,6 @@ pub struct DaemonServer {
     pub command_sender: mpsc::Sender<IpcCommand>,
 }
 
-//impl DaemonServer {
-//    async fn send(&self, command: IpcCommand) -> Result<(), WayclipError> {
-//        let (sender, receiver) = oneshot::channel();
-//        self.command_sender.send(command)
-//
-//    }
-//}
-
 #[interface(name = "org.wayclip.Daemon1")]
 impl DaemonServer {
     #[zbus(name = "GetStatus")]

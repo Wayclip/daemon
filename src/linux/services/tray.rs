@@ -1,16 +1,16 @@
-use std::time::Duration;
-
-use crate::linux::ipc::client::DaemonClient;
-use crate::linux::ipc::commands::IpcCommand;
 use ksni::MenuItem;
 use ksni::TrayMethods;
 use ksni::menu::StandardItem;
+use std::time::Duration;
 use sysinfo::Pid;
 use sysinfo::System;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use wayclip_core::models::daemon::client::DaemonClient;
 use wayclip_core::settings::tray::TraySettings;
+
+use crate::linux::ipc::commands::IpcCommand;
 
 static TRAY_LOGO_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),

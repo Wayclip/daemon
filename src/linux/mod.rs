@@ -1,5 +1,4 @@
 use sd_notify::NotifyState;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     io::IsTerminal,
@@ -12,8 +11,10 @@ use tokio::{
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
-use wayclip_core::{models::error::WayclipError, settings::UserSettings};
-use zbus::zvariant::Type;
+use wayclip_core::{
+    models::{daemon::DaemonStatus, error::WayclipError},
+    settings::UserSettings,
+};
 
 use crate::{
     common::{
@@ -40,16 +41,6 @@ pub mod engine;
 pub mod ipc;
 pub mod services;
 pub mod session;
-
-#[derive(Debug, Clone, PartialEq, Eq, Type, Serialize, Deserialize)]
-pub enum DaemonStatus {
-    Active,
-    Inactive,
-    Saving,
-    Activating,
-    Deactivating,
-    Failed,
-}
 
 /// The DaemonCore will act as the central orchistrator for the whole of daemon
 pub struct DaemonCore {
