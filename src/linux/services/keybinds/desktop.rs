@@ -1,11 +1,11 @@
 use crate::linux::ipc::commands::IpcCommand;
-use crate::linux::ipc::{
-    DEFAULT_DBUS_INTERFACE as IFACE, DEFAULT_DBUS_SERVICE as SVC, DEFAULT_INTERFACE_PATH as PATH,
-};
 use log::info;
 use std::{env, process::Command};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use wayclip_core::models::daemon::{
+    DEFAULT_DBUS_INTERFACE as IFACE, DEFAULT_DBUS_SERVICE as SVC, DEFAULT_INTERFACE_PATH as PATH,
+};
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::models::input::keyboard::WayclipKeyCombo;
 use wayclip_global_hotkey::GlobalHotKeyEvent;

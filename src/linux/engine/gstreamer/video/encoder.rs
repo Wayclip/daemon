@@ -32,18 +32,18 @@ impl VideoEncoderFactory {
         GStreamerElement::new(
             codec.get_encoder(),
             vec![
-                GStreamerElementProperty {
-                    name: "bitrate".into(),
-                    value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                },
-                GStreamerElementProperty {
-                    name: "gop-size".into(),
-                    value: GStreamerElementPropertyValue::Typed(DEFAULT_GOP_SIZE.into()),
-                },
-                GStreamerElementProperty {
-                    name: "rc-mode".into(),
-                    value: GStreamerElementPropertyValue::Serialized("cbr".into()),
-                },
+                GStreamerElementProperty::new(
+                    "bitrate",
+                    GStreamerElementPropertyValue::typed(bitrate),
+                ),
+                GStreamerElementProperty::new(
+                    "gop-size",
+                    GStreamerElementPropertyValue::typed(DEFAULT_GOP_SIZE),
+                ),
+                GStreamerElementProperty::new(
+                    "rc-mode",
+                    GStreamerElementPropertyValue::from_str("cbr"),
+                ),
             ],
         )
         .build_element()
@@ -53,14 +53,14 @@ impl VideoEncoderFactory {
         GStreamerElement::new(
             codec.get_encoder(),
             vec![
-                GStreamerElementProperty {
-                    name: "bitrate".into(),
-                    value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                },
-                GStreamerElementProperty {
-                    name: "key-int-max".into(),
-                    value: GStreamerElementPropertyValue::Typed(DEFAULT_KEYFRAME_PERIOD.into()),
-                },
+                GStreamerElementProperty::new(
+                    "bitrate",
+                    GStreamerElementPropertyValue::typed(bitrate),
+                ),
+                GStreamerElementProperty::new(
+                    "key-int-max",
+                    GStreamerElementPropertyValue::typed(DEFAULT_KEYFRAME_PERIOD),
+                ),
             ],
         )
         .build_element()
@@ -73,50 +73,50 @@ impl VideoEncoderFactory {
 
         let properties = match codec {
             VideoCodec::H264(_) => vec![
-                GStreamerElementProperty {
-                    name: "bitrate".into(),
-                    value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                },
-                GStreamerElementProperty {
-                    name: "key-int-max".into(),
-                    value: GStreamerElementPropertyValue::Typed(DEFAULT_KEYFRAME_PERIOD.into()),
-                },
-                GStreamerElementProperty {
-                    name: "speed-preset".into(),
-                    value: GStreamerElementPropertyValue::Serialized("ultrafast".into()),
-                },
-                GStreamerElementProperty {
-                    name: "tune".into(),
-                    value: GStreamerElementPropertyValue::Serialized("zerolatency".into()),
-                },
-                GStreamerElementProperty {
-                    name: "threads".into(),
-                    value: GStreamerElementPropertyValue::Typed(threads.into()),
-                },
-                GStreamerElementProperty {
-                    name: "sliced-threads".into(),
-                    value: GStreamerElementPropertyValue::Typed(true.into()),
-                },
+                GStreamerElementProperty::new(
+                    "bitrate",
+                    GStreamerElementPropertyValue::typed(bitrate),
+                ),
+                GStreamerElementProperty::new(
+                    "key-int-max",
+                    GStreamerElementPropertyValue::typed(DEFAULT_KEYFRAME_PERIOD),
+                ),
+                GStreamerElementProperty::new(
+                    "speed-preset",
+                    GStreamerElementPropertyValue::from_str("ultrafast"),
+                ),
+                GStreamerElementProperty::new(
+                    "tune",
+                    GStreamerElementPropertyValue::from_str("zerolatency"),
+                ),
+                GStreamerElementProperty::new(
+                    "threads",
+                    GStreamerElementPropertyValue::typed(threads),
+                ),
+                GStreamerElementProperty::new(
+                    "sliced-threads",
+                    GStreamerElementPropertyValue::typed(true),
+                ),
             ],
             VideoCodec::H265(_) => vec![
-                GStreamerElementProperty {
-                    name: "bitrate".into(),
-                    value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-                },
-                GStreamerElementProperty {
-                    name: "key-int-max".into(),
-                    value: GStreamerElementPropertyValue::Typed(DEFAULT_KEYFRAME_PERIOD.into()),
-                },
-                GStreamerElementProperty {
-                    name: "speed-preset".into(),
-                    value: GStreamerElementPropertyValue::Serialized("ultrafast".into()),
-                },
+                GStreamerElementProperty::new(
+                    "bitrate",
+                    GStreamerElementPropertyValue::typed(bitrate),
+                ),
+                GStreamerElementProperty::new(
+                    "key-int-max",
+                    GStreamerElementPropertyValue::typed(DEFAULT_KEYFRAME_PERIOD),
+                ),
+                GStreamerElementProperty::new(
+                    "speed-preset",
+                    GStreamerElementPropertyValue::from_str("ultrafast"),
+                ),
             ],
             // AV1 uses target-bitrate instead
-            VideoCodec::AV1(_) => vec![GStreamerElementProperty {
-                name: "target-bitrate".into(),
-                value: GStreamerElementPropertyValue::Typed(bitrate.into()),
-            }],
+            VideoCodec::AV1(_) => vec![GStreamerElementProperty::new(
+                "target-bitrate",
+                GStreamerElementPropertyValue::typed(bitrate),
+            )],
         };
 
         GStreamerElement::new(codec.get_encoder(), properties).build_element()

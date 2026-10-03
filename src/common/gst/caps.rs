@@ -51,85 +51,53 @@ impl GStreamerCapsType {
                 memory,
                 format,
             } => {
-                let mut caps = GStreamerCaps {
-                    name: "video/x-raw".into(),
-                    features: None,
-                    ..Default::default()
-                };
+                let mut fields = Vec::new();
                 if let Some(w) = width {
-                    caps.fields.push(GStreamerCapsField {
-                        name: "width".into(),
-                        value: w.to_send_value(),
-                    });
+                    fields.push(GStreamerCapsField::new("width", w.to_send_value()));
                 }
                 if let Some(h) = height {
-                    caps.fields.push(GStreamerCapsField {
-                        name: "height".into(),
-                        value: h.to_send_value(),
-                    });
+                    fields.push(GStreamerCapsField::new("height", h.to_send_value()));
                 }
                 if let Some(f) = format {
-                    caps.fields.push(GStreamerCapsField {
-                        name: "format".into(),
-                        value: f.to_string().to_send_value(),
-                    });
+                    fields.push(GStreamerCapsField::new(
+                        "format",
+                        f.to_string().to_send_value(),
+                    ));
                 }
                 if let Some(f) = framerate {
-                    caps.fields.push(GStreamerCapsField {
-                        name: "framerate".into(),
-                        value: f.to_send_value(),
-                    });
+                    fields.push(GStreamerCapsField::new("framerate", f.to_send_value()));
                 }
-                if let Some(m) = memory {
-                    caps.features = Some(m.to_string().into())
-                }
-                caps
+                let features = memory.as_ref().map(|m| m.to_string().into());
+
+                GStreamerCaps::new("video/x-raw", features, fields)
             }
             Self::AudioXRaw { rate, channels } => {
-                let mut caps = GStreamerCaps {
-                    name: "audio/x-raw".into(),
-                    features: None,
-                    fields: vec![GStreamerCapsField {
-                        name: "channels".into(),
-                        value: channels.into(),
-                    }],
-                };
+                let mut fields = vec![GStreamerCapsField::new(
+                    "channels",
+                    channels.to_send_value(),
+                )];
                 if let Some(r) = rate {
-                    caps.fields.push(GStreamerCapsField {
-                        name: "rate".into(),
-                        value: r.to_send_value(),
-                    });
+                    fields.push(GStreamerCapsField::new("rate", r.to_send_value()));
                 }
-                caps
+
+                GStreamerCaps::new("audio/x-raw", None, fields)
             }
-            Self::VideoXH264 => GStreamerCaps {
-                name: "video/x-h264".into(),
-                features: None,
-                fields: vec![
-                    GStreamerCapsField {
-                        name: "stream-format".into(),
-                        value: "byte-stream".into(),
-                    },
-                    GStreamerCapsField {
-                        name: "alignment".into(),
-                        value: "au".into(),
-                    },
+            Self::VideoXH264 => GStreamerCaps::new(
+                "video/x-h264",
+                None,
+                vec![
+                    GStreamerCapsField::new("stream-format", "byte-stream"),
+                    GStreamerCapsField::new("alignment", "au"),
                 ],
-            },
-            Self::VideoXH265 => GStreamerCaps {
-                name: "video/x-h265".into(),
-                features: None,
-                fields: vec![
-                    GStreamerCapsField {
-                        name: "stream-format".into(),
-                        value: "byte-stream".into(),
-                    },
-                    GStreamerCapsField {
-                        name: "alignment".into(),
-                        value: "au".into(),
-                    },
+            ),
+            Self::VideoXH265 => GStreamerCaps::new(
+                "video/x-h265",
+                None,
+                vec![
+                    GStreamerCapsField::new("stream-format", "byte-stream"),
+                    GStreamerCapsField::new("alignment", "au"),
                 ],
-            },
+            ),
         }
     }
 }
@@ -187,7 +155,7 @@ pub struct GStreamerCapsField {
 }
 
 impl GStreamerCapsField {
-    fn new<N, V>(name: N, value: V) -> Self
+    pub fn new<N, V>(name: N, value: V) -> Self
     where
         N: Into<Cow<'static, str>>,
         V: Into<glib::SendValue>,

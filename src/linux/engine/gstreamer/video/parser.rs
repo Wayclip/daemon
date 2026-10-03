@@ -34,10 +34,10 @@ impl VideoParserFactory {
     ) -> Result<(Element, Option<Element>), WayclipError> {
         let parser = GStreamerElement::new(
             codec.get_parser(),
-            vec![GStreamerElementProperty {
-                name: "config-interval".into(),
-                value: GStreamerElementPropertyValue::Typed(DEFAULT_CONFIG_INTERVAL.into()),
-            }],
+            vec![GStreamerElementProperty::new(
+                "config-interval",
+                GStreamerElementPropertyValue::typed(DEFAULT_CONFIG_INTERVAL),
+            )],
         )
         .build_element()?;
 
