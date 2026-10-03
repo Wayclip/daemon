@@ -33,6 +33,9 @@ impl AudioDeviceFactory {
     ) -> Result<(), WayclipError> {
         let state = manager.current_state();
         let audio = &user_settings.recording.audio;
+        if !audio.background.enabled && !audio.microphone.enabled {
+            return Ok(());
+        }
 
         if audio.background.enabled {
             let (node_name, node_level) = match manager
@@ -86,7 +89,7 @@ impl AudioDeviceFactory {
                                 WayclipError::NotFound("No default source found".into())
                             })?
                             .node_name,
-                        1.0,
+                        audio.microphone.level.0,
                     )
                 }
             };
@@ -123,6 +126,7 @@ impl AudioDeviceFactory {
     ) -> Result<(), WayclipError> {
         let pipewire_src = GStreamer::build_element(GStreamerElementType::AudioPipewireSrc {
             do_timestamp: DEFAULT_APPSRC_DO_TIMESTAMP,
+            // Passing ID seems like the correct choice
             target_object: audio_node_id.to_string().into(),
             sink: audio_node_type.is_sink(),
         })?;

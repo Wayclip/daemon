@@ -12,13 +12,7 @@ use crate::{
         gst::bus::{BusWatcher, CoreEvent},
         video::ring::RingBuffer,
     },
-    linux::{
-        engine::{
-            gstreamer::{DaemonEngineGStreamer, save::SavePipelineFactory},
-            pipewire::DaemonEnginePipewire,
-        },
-        session::CurrentSession,
-    },
+    linux::engine::{gstreamer::DaemonEngineGStreamer, pipewire::DaemonEnginePipewire},
 };
 
 pub const STALL_LIMIT: Duration = Duration::from_secs(10);
@@ -51,12 +45,15 @@ impl DaemonEngine {
 
     /// Method to safely stop the pipeline, managers and watcher.
     pub async fn stop(&mut self) -> Result<(), WayclipError> {
-        let gst = self.gstreamer_pipeline.stop();
+        self.stop_watcher();
+
+        let p = self.gstreamer_pipeline.pipeline.clone();
+        let gst = tokio::task::spawn_blocking(move || p.set_state(::gstreamer::State::Null))
+            .await
+            .map_err(|e| WayclipError::Validation(e.to_string().into()))?;
         let pw = self.pipewire_pipeline.stop().await;
-        if let Some(ref wa) = self.watcher {
-            wa.stop();
-        }
-        gst.and(pw)
+
+        gst.map(|_| ()).map_err(WayclipError::from).and(pw)
     }
 
     /// Returns the clone of the ring

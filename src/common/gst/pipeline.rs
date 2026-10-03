@@ -1,5 +1,5 @@
 use gstreamer::{
-    ClockTime, Element, MessageView, State, StateChangeSuccess,
+    ClockTime, Element, MessageType, MessageView, State, StateChangeSuccess,
     glib::object::{Cast, IsA},
     prelude::{ElementExt, ElementExtManual, GstBinExt, GstObjectExt},
 };
@@ -143,8 +143,15 @@ impl GStreamerPipeline {
             .bus()
             .ok_or_else(|| WayclipError::Remux("No bus found".into()))?;
 
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_nanos(timeout.nseconds());
         let result = loop {
-            match bus.timed_pop(timeout) {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let wait = ClockTime::from_nseconds(left.as_nanos() as u64);
+            match bus.timed_pop_filtered(
+                wait,
+                &[MessageType::Eos, MessageType::Error, MessageType::Warning],
+            ) {
                 Some(message) => match message.view() {
                     MessageView::Eos(_) => {
                         log::debug!("Pipeline completed, EOS");

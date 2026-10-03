@@ -53,7 +53,7 @@ impl CurrentSession {
 
     // TODO:
     // In the future, consider making this method fetch the UserSessionInfo by itself?
-    pub async fn tick(&mut self, game: Option<Game>, user_session: Option<UserSessionInfo>) {
+    pub fn tick(&mut self, game: Option<Game>, user_session: Option<UserSessionInfo>) {
         self.game = game;
         self.user_session = user_session;
     }

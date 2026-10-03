@@ -3,7 +3,7 @@ use ashpd::{
         CreateSessionOptions, PersistMode, Session,
         screencast::{
             CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
-            StartCastOptions,
+            StartCastOptions, Streams,
         },
     },
     enumflags2::BitFlags,
@@ -101,32 +101,42 @@ impl DaemonEnginePipewire {
         // Attempt to load an existing token from ~/.local/state
         let existing_token = self.load_restore_token()?;
 
-        let select_sources_options = SelectSourcesOptions::default()
-            .set_cursor_mode(mode)
-            .set_restore_token(existing_token.as_deref())
-            .set_persist_mode(DEFAULT_PERSIST_MODE)
-            .set_multiple(false)
-            .set_sources(BitFlags::from(DEFAULT_SOURCE_TYPE));
+        let result = async {
+            let select_sources_options = SelectSourcesOptions::default()
+                .set_cursor_mode(mode)
+                .set_restore_token(existing_token.as_deref())
+                .set_persist_mode(DEFAULT_PERSIST_MODE)
+                .set_multiple(false)
+                .set_sources(BitFlags::from(DEFAULT_SOURCE_TYPE));
 
-        proxy
-            .select_sources(&session, select_sources_options)
-            .await?;
+            proxy
+                .select_sources(&session, select_sources_options)
+                .await?;
 
-        // Request a select from user -- this is the interactive step
-        let start_request = proxy
-            .start(&session, None, StartCastOptions::default())
-            .await?;
+            // Request a select from user -- this is the interactive step
+            let start_request = proxy
+                .start(&session, None, StartCastOptions::default())
+                .await?;
 
-        // query streams & extract data
-        let streams = start_request.response()?;
-        let stream = streams.streams().first().ok_or_else(|| {
-            WayclipError::Screencast("Could not extract first stream in response".into())
-        })?;
+            // query streams & extract data
+            let streams = start_request.response()?;
+            let stream = streams.streams().first().ok_or_else(|| {
+                WayclipError::Screencast("Could not extract first stream in response".into())
+            })?;
 
-        let node_id = stream.pipe_wire_node_id().to_string();
-        let file_descriptor = proxy
-            .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
-            .await?;
+            let node_id = stream.pipe_wire_node_id().to_string();
+            let file_descriptor = proxy
+                .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
+                .await?;
+
+            Ok::<(Streams, String, OwnedFd), WayclipError>((streams, node_id, file_descriptor))
+        }
+        .await;
+
+        let Ok((streams, node_id, file_descriptor)) = result else {
+            let _ = session.close().await;
+            return Err(WayclipError::Fatal("select source fail".into()));
+        };
 
         // now extract token from streams & save it
         if let Some(token) = streams.restore_token() {

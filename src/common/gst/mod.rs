@@ -107,9 +107,9 @@ impl GStreamer {
 
     pub fn link_dynamic_pad(src: &Element, sink: Element, prefix: &'static str) {
         src.connect_pad_added(move |_, src_pad| {
-            let Some(caps) = src_pad.current_caps() else {
-                return;
-            };
+            let caps = src_pad
+                .current_caps()
+                .unwrap_or_else(|| src_pad.query_caps(None));
             let Some(structure) = caps.structure(0) else {
                 return;
             };

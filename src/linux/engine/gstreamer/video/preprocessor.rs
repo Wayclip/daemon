@@ -135,13 +135,26 @@ impl VideoPreprocessFactory {
         let caps_2 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
             width: Some(user_settings.recording.video.resolution.width as i32),
             height: Some(user_settings.recording.video.resolution.height as i32),
-            // TODO: VAAPI NO FPS??
             framerate: None,
             format: Some(VideoXRawFormat::NV12),
             memory: Some(VideoXRawMemory::VAMemory),
         });
         let caps_filter_2 =
             GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_2 })?;
+
+        let videorate = GStreamer::build_element(GStreamerElementType::VideoRate)?;
+        let caps_3 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
+            width: None,
+            height: None,
+            framerate: Some(gstreamer::Fraction::new(
+                user_settings.recording.video.fps.0 as i32,
+                1,
+            )),
+            format: Some(VideoXRawFormat::NV12),
+            memory: Some(VideoXRawMemory::VAMemory),
+        });
+        let caps_filter_3 =
+            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_3 })?;
 
         Ok((
             vec![
@@ -151,8 +164,10 @@ impl VideoPreprocessFactory {
                 // queue from main pipeline
                 video_queue.clone(),
                 vapostproc,
+                caps_filter_2,
+                videorate,
             ],
-            caps_filter_2,
+            caps_filter_3,
         ))
     }
 
