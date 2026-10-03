@@ -1,6 +1,6 @@
 use crate::{
-    common::notifications::{NotificationEvent, NotificationManager},
-    linux::{core::DEFAULT_PIPEWIRE_TIMEOUT, pipewire::PipewireManager},
+    common::misc::notifications::{NotificationEvent, NotificationManager},
+    linux::engine::pipewire::manager::PipewireManager,
 };
 use ashpd::desktop::screencast::Screencast;
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,7 @@ pub struct Doctor {
     pub background: (String, bool),
 }
 
+pub const DEFAULT_PIPEWIRE_TIMEOUT: u64 = 4;
 pub const XDG_PORTAL_TIMEOUT_S: u64 = 4;
 
 impl Doctor {
@@ -255,25 +256,35 @@ impl Doctor {
     pub async fn check_gstreamer_elements(&self) -> Vec<DoctorResult> {
         gstreamer::init().unwrap_or_default();
 
+        let video_parser = self.video_codec.get_parser();
+        let video_encoder = self.video_codec.get_encoder();
+        let video_mux = self.video_format.get_mux();
+        let audio_parser = self.audio_codec.get_parser();
+        let audio_encoder = self.audio_codec.get_encoder();
+
         let element_checks: Vec<(&str, bool)> = vec![
-            // default ones
             ("pipewiresrc", true),
             ("queue", true),
             ("capsfilter", true),
             ("appsink", true),
+            ("appsrc", true),
             ("videoconvert", true),
             ("videoscale", true),
             ("videorate", true),
-            // depends on config
-            (self.video_codec.get_parser(), true),
-            (self.video_codec.get_encoder(), true),
-            (self.video_format.get_mux(), true),
-            (self.audio_codec.get_parser(), true),
-            (self.audio_codec.get_encoder(), true),
-            // optional
-            ("nvh264enc", false),
-            ("vah264enc", false),
-            ("x264enc", false),
+            ("audiomixer", true),
+            ("audioconvert", true),
+            ("audioresample", true),
+            ("decodebin", true),
+            ("filesrc", true),
+            ("filesink", true),
+            ("x264enc", true),
+            ("h264parse", true),
+            ("matroskamux", true),
+            (video_parser.as_ref(), true),
+            (video_encoder.as_ref(), true),
+            (video_mux.as_ref(), true),
+            (audio_parser.as_ref(), true),
+            (audio_encoder.as_ref(), true),
         ];
 
         element_checks
