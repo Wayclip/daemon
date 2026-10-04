@@ -12,15 +12,18 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use wayclip_core::{
-    models::{daemon::DaemonStatus, error::WayclipError},
+    models::{
+        daemon::{
+            DaemonStatus,
+            notifications::{NotificationEvent, NotificationManager},
+        },
+        error::WayclipError,
+    },
     settings::UserSettings,
 };
 
 use crate::{
-    common::{
-        gst::bus::CoreEvent,
-        misc::notifications::{NotificationEvent, NotificationManager},
-    },
+    common::gst::bus::CoreEvent,
     linux::{
         engine::{
             DaemonEngine, STALL_LIMIT,
@@ -36,7 +39,6 @@ const MAX_RECOVERIES: usize = 3;
 const RECOVERY_WINDOW: Duration = Duration::from_secs(300);
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub mod doctor;
 pub mod engine;
 pub mod ipc;
 pub mod services;
