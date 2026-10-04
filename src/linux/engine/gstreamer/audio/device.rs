@@ -3,17 +3,20 @@ use crate::{
         GStreamer, app::DEFAULT_APPSRC_DO_TIMESTAMP, caps::GStreamerCapsType,
         element::GStreamerElementType, pipeline::GStreamerPipeline,
     },
-    linux::engine::{
-        gstreamer::audio::{DEFAULT_AUDIO_CHANNELS, DefaultDeviceType},
-        pipewire::manager::{PipewireManager, PipewireNodeType},
-    },
+    linux::engine::gstreamer::audio::{DEFAULT_AUDIO_CHANNELS, DefaultDeviceType},
 };
 use gstreamer::{
     Element,
     glib::object::ObjectExt,
     prelude::{ElementExt, ElementExtManual, PadExt},
 };
-use wayclip_core::{models::error::WayclipError, settings::UserSettings};
+use wayclip_core::{
+    models::{
+        daemon::pipewire::{PipewireManager, PipewireNodeType},
+        error::WayclipError,
+    },
+    settings::UserSettings,
+};
 
 pub struct AudioDeviceFactory;
 

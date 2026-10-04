@@ -12,16 +12,12 @@ use std::{
     fs::{create_dir_all, read_to_string, write},
     os::fd::{AsRawFd, OwnedFd},
 };
-use wayclip_core::models::error::WayclipError;
-
-use crate::linux::engine::pipewire::manager::PipewireManager;
+use wayclip_core::models::{daemon::pipewire::PipewireManager, error::WayclipError};
 
 const DEFAULT_SOURCE_TYPE: SourceType = SourceType::Monitor;
 const DEFAULT_RESTORE_TOKEN_PATH: &str = "wayclip/restore_token";
 const DEFAULT_CURSOR_MODE: CursorMode = CursorMode::Embedded;
 const DEFAULT_PERSIST_MODE: PersistMode = PersistMode::ExplicitlyRevoked;
-
-pub mod manager;
 
 // We use ashpd to capute the screen, however, the input is provided by pipewire anyway
 pub struct DaemonEnginePipewire {

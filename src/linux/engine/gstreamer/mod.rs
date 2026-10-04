@@ -5,6 +5,7 @@ use gstreamer_app::AppSinkCallbacks;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Instant;
+use wayclip_core::models::daemon::pipewire::PipewireManager;
 use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::UserSettings;
 
@@ -17,7 +18,6 @@ use crate::linux::engine::gstreamer::audio::AudioBranchBuilder;
 use crate::linux::engine::gstreamer::audio::device::AudioDeviceFactory;
 use crate::linux::engine::gstreamer::video::VideoBranchBuilder;
 use crate::linux::engine::pipewire::DaemonEngineConnectionData;
-use crate::linux::engine::pipewire::manager::PipewireManager;
 use wayclip_core::settings::recording::CodecType;
 
 const DEFAULT_CONFIG_INTERVAL: i32 = 1;
