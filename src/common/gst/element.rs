@@ -3,9 +3,7 @@ use gstreamer::{
     glib::{self, value::ToValue},
 };
 use std::{borrow::Cow, path::PathBuf};
-use wayclip_core::models::error::WayclipError;
-
-use crate::common::video::preview::DEFAULT_PREVIEW_BITRATE;
+use wayclip_core::{app::clips::ffmpeg::DEFAULT_PREVIEW_BITRATE, models::error::WayclipError};
 
 // --- Element Types ---
 
