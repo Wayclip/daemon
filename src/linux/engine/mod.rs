@@ -43,7 +43,7 @@ pub struct DaemonEngine {
     pub watcher: Option<BusWatcher>,
     started_at: Option<Instant>,
     /// we can track the current mode of capture and change it as time goes on
-    capture_mode: CaptureMode,
+    pub capture_mode: CaptureMode,
     health: Arc<CaptureHealth>,
     dmabuf_strikes: usize,
     dmabuf_retry_at: Option<Instant>,
