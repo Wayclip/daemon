@@ -27,7 +27,10 @@ use crate::{
     linux::{
         engine::{
             DaemonEngine, STALL_LIMIT,
-            gstreamer::save::{SaveDone, SavePipelineFactory},
+            gstreamer::{
+                CaptureMode,
+                save::{SaveDone, SavePipelineFactory},
+            },
         },
         ipc::{DaemonIpc, commands::IpcCommand},
         services::DaemonServices,
@@ -205,7 +208,7 @@ impl DaemonCore {
                         CoreEvent::PipelineError(m) => m,
                         CoreEvent::PipelineEos => "unexpected EOS".to_string(),
                     };
-                    self.try_recover(&reason).await;
+                    self.handle_pipeline_failure(&reason).await;
                 }
 
                 Some(SaveDone { result, responder }) = self.save_channel.1.recv() => {
@@ -236,9 +239,15 @@ impl DaemonCore {
                     if let Err(e) = self.services.update(&mut self.current_session) {
                         log::error!("service update failed: {e}");
                     }
-                    if self.status == DaemonStatus::Active && self.engine.is_stalled(STALL_LIMIT) {
-                        log::error!("no video frames for {}s", STALL_LIMIT.as_secs());
-                        self.try_recover("video stalled").await;
+                    if self.status == DaemonStatus::Active {
+                        if self.engine.capture_degraded() {
+                            self.downgrade_capture("guard dropped every frame").await;
+                        } else if self.engine.is_stalled(STALL_LIMIT) {
+                            log::error!("no video frames for {}s", STALL_LIMIT.as_secs());
+                            self.handle_pipeline_failure("video stalled").await;
+                        } else if self.engine.dmabuf_retry_due() {
+                            self.retry_dmabuf().await;
+                        }
                     }
                 }
 
@@ -307,6 +316,52 @@ impl DaemonCore {
         }
 
         Ok(())
+    }
+
+    /// Cheap downgrade
+    async fn handle_pipeline_failure(&mut self, reason: &str) {
+        if self.engine.capture_mode() == CaptureMode::DmaBuf {
+            self.downgrade_capture(reason).await;
+        } else {
+            self.try_recover(reason).await;
+        }
+    }
+
+    async fn downgrade_capture(&mut self, reason: &str) {
+        let settings = self.current_session.user_settings.clone();
+        let sender = self.event_channel.0.clone();
+        let res = tokio::time::timeout(
+            RECOVERY_TIMEOUT,
+            self.engine
+                .downgrade_to_system_memory(&settings, sender, reason),
+        )
+        .await;
+
+        match res {
+            Ok(Ok(())) => while self.event_channel.1.try_recv().is_ok() {},
+            other => {
+                log::error!("fast fallback failed ({other:?}), doing full recovery");
+                self.try_recover(reason).await;
+            }
+        }
+    }
+
+    async fn retry_dmabuf(&mut self) {
+        let settings = self.current_session.user_settings.clone();
+        let sender = self.event_channel.0.clone();
+        let res = tokio::time::timeout(
+            RECOVERY_TIMEOUT,
+            self.engine.retry_dmabuf(&settings, sender),
+        )
+        .await;
+
+        match res {
+            Ok(Ok(())) => while self.event_channel.1.try_recv().is_ok() {},
+            other => {
+                log::warn!("DMABuf retry failed to start ({other:?}). staying on system memory");
+                self.downgrade_capture("dmabuf retry failed").await;
+            }
+        }
     }
 
     async fn try_recover(&mut self, reason: &str) {

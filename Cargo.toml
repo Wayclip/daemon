@@ -28,6 +28,7 @@ gstreamer = "0.25.3"
 gstreamer-app = "0.25.2"
 gstreamer-gl = "0.25.2"
 gstreamer-gl-egl = "0.25.0"
+gstreamer-video = { version = "0.25", features = ["v1_24"] }
 ksni = "0.3.6"
 log = "0.4.33"
 nanoid = "0.5.0"

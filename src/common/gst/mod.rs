@@ -9,6 +9,7 @@ pub mod app;
 pub mod bus;
 pub mod caps;
 pub mod element;
+pub mod guard;
 pub mod pipeline;
 
 /// We define a custom wrapper to be able to construct and template gstreamer elements more easily
