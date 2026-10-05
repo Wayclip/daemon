@@ -320,7 +320,7 @@ impl DaemonCore {
 
     /// Cheap downgrade
     async fn handle_pipeline_failure(&mut self, reason: &str) {
-        if self.engine.capture_mode() == CaptureMode::DmaBuf {
+        if self.engine.capture_mode == CaptureMode::DmaBuf {
             self.downgrade_capture(reason).await;
         } else {
             self.try_recover(reason).await;
