@@ -5802,6 +5802,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-gl",
  "gstreamer-gl-egl",
+ "gstreamer-video",
  "ksni",
  "log",
  "nanoid",

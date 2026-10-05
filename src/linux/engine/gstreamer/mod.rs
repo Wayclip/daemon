@@ -10,6 +10,7 @@ use wayclip_core::models::error::WayclipError;
 use wayclip_core::settings::UserSettings;
 
 use crate::common::gst::app::GStreamerApp;
+use crate::common::gst::guard::CaptureHealth;
 use crate::common::video::ring::{
     RingBuffer,
     data::{ContentType, EncodedFrame},
@@ -33,6 +34,12 @@ pub mod save;
 pub mod video;
 
 use crate::common::gst::pipeline::GStreamerPipeline;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureMode {
+    DmaBuf,
+    SystemMemory,
+}
 
 pub type ParserFilter = (gstreamer::Element, Option<gstreamer::Element>);
 
@@ -61,6 +68,8 @@ impl DaemonEngineGStreamer {
         connection_data: &DaemonEngineConnectionData,
         manager: &PipewireManager,
         ring: Arc<Mutex<RingBuffer>>,
+        mode: CaptureMode,
+        health: Arc<CaptureHealth>,
     ) -> Result<(), WayclipError> {
         if matches!(
             user_settings.recording.video.codec.get_backend(),
@@ -71,7 +80,13 @@ impl DaemonEngineGStreamer {
             self.pipeline.bind_gl_display(&gl_display)?;
         }
 
-        self.setup_video(user_settings, connection_data, Arc::clone(&ring))?;
+        self.setup_video(
+            user_settings,
+            connection_data,
+            Arc::clone(&ring),
+            mode,
+            health,
+        )?;
         self.setup_audio(user_settings, manager, Arc::clone(&ring))?;
 
         Ok(())
@@ -94,8 +109,11 @@ impl DaemonEngineGStreamer {
         user_settings: &UserSettings,
         connection_data: &DaemonEngineConnectionData,
         ring: Arc<Mutex<RingBuffer>>,
+        mode: CaptureMode,
+        health: Arc<CaptureHealth>,
     ) -> Result<(), WayclipError> {
-        let video_branch = VideoBranchBuilder::new(user_settings, connection_data).build()?;
+        let video_branch =
+            VideoBranchBuilder::new(user_settings, connection_data, mode, health).build()?;
 
         self.pipeline
             .add_and_link(video_branch.iter().collect::<Vec<&Element>>().as_slice())?;
