@@ -193,8 +193,10 @@ impl TrayManager {
             log::info!("Tray registered successfully");
 
             if poll {
-                let mut sys = System::new_all();
                 let pid = Pid::from(std::process::id() as usize);
+                let mut sys = System::new();
+                sys.refresh_cpu_all();
+                sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
 
                 loop {
                     tokio::select! {

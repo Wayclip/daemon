@@ -181,13 +181,16 @@ impl DaemonEngineGStreamer {
                 match content_type {
                     ContentType::Video => {
                         ring.video_last_instant = Some(Instant::now());
-                        if ring.awaiting_video_resync {
+                        if ring.awaiting_video_resync || ring.awaiting_audio_resync {
                             if let Some(reference) = ring.video_resync_reference {
-                                let gap = ClockTime::from_mseconds(33);
-                                ring.video_pts_offset_ns =
-                                    (reference + gap).nseconds() as i64 - pts.nseconds() as i64;
+                                let off = (reference + ClockTime::from_mseconds(33)).nseconds()
+                                    as i64
+                                    - pts.nseconds() as i64;
+                                ring.video_pts_offset_ns = off;
+                                ring.audio_pts_offset_ns = off;
                             }
                             ring.awaiting_video_resync = false;
+                            ring.awaiting_audio_resync = false;
                         }
 
                         let shifted = pts.nseconds() as i64 + ring.video_pts_offset_ns;
@@ -196,12 +199,15 @@ impl DaemonEngineGStreamer {
                     ContentType::Audio => {
                         ring.audio_last_instant = Some(Instant::now());
 
-                        if ring.awaiting_audio_resync {
-                            if let Some(reference) = ring.audio_resync_reference {
-                                let gap = ClockTime::from_mseconds(20);
-                                ring.audio_pts_offset_ns =
-                                    (reference + gap).nseconds() as i64 - pts.nseconds() as i64;
+                        if ring.awaiting_video_resync || ring.awaiting_audio_resync {
+                            if let Some(reference) = ring.video_resync_reference {
+                                let off = (reference + ClockTime::from_mseconds(33)).nseconds()
+                                    as i64
+                                    - pts.nseconds() as i64;
+                                ring.video_pts_offset_ns = off;
+                                ring.audio_pts_offset_ns = off;
                             }
+                            ring.awaiting_video_resync = false;
                             ring.awaiting_audio_resync = false;
                         }
 
