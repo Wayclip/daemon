@@ -107,43 +107,26 @@ impl VideoPreprocessFactory {
         // More GL processingg!
         let gl_color_convert_post = GStreamer::build_element(GStreamerElementType::GLColorConvert)?;
 
-        let caps_4 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
-            width: None,
-            height: None,
-            framerate: None,
-            format: Some(VideoXRawFormat::NV12),
-            memory: Some(VideoXRawMemory::GLMemory),
-        });
-        let caps_filter_4 =
-            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_4 })?;
-
         // Frame rate conversion happens on DMABuf frames, before the GL upload.
         let videorate = GStreamer::build_element(GStreamerElementType::VideoRate)?;
-
-        let caps_framerate = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
+        let caps_4 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
             width: None,
             height: None,
             framerate: Some(gstreamer::Fraction::new(
                 user_settings.recording.video.fps.0 as i32,
                 1,
             )),
-            format: None,
-            memory: match mode {
-                CaptureMode::DmaBuf => Some(VideoXRawMemory::DMABuf),
-                CaptureMode::SystemMemory => None,
-            },
+            format: Some(VideoXRawFormat::NV12),
+            memory: Some(VideoXRawMemory::GLMemory),
         });
-        let caps_filter_framerate = GStreamer::build_element(GStreamerElementType::CapsFilter {
-            caps: caps_framerate,
-        })?;
+        let caps_filter_4 =
+            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_4 })?;
 
         Ok((
             vec![
                 // pipewire from main pipeline
                 pipewire_src.clone(),
                 caps_filter_1,
-                videorate,
-                caps_filter_framerate,
                 // queue from main pipeline
                 video_queue.clone(),
                 gl_upload,
@@ -152,6 +135,7 @@ impl VideoPreprocessFactory {
                 gl_color_scale,
                 caps_filter_3,
                 gl_color_convert_post,
+                videorate,
             ],
             caps_filter_4,
         ))

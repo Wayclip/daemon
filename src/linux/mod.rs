@@ -122,6 +122,7 @@ impl DaemonCore {
     /// state, where we will recording, accept IPC calls, and wait for further termination input.
     /// This will be a wrapper arouund setup() so we can change state if something fails inside
     pub async fn start(&mut self) -> Result<(), WayclipError> {
+        tokio::spawn(MemoryManager::run_trim());
         // Put ourselves into the activating status & send notification to user that daemon is
         // starting
         self.update_status(DaemonStatus::Activating)?;
@@ -238,6 +239,7 @@ impl DaemonCore {
 
                 Some(SaveDone { result, responder }) = self.save_channel.1.recv() => {
                     self.status = DaemonStatus::Active;
+                    tokio::task::spawn_blocking(MemoryManager::trim);
                     match &result {
                         Ok(name) => {
                             // TODO: Automatic Uploads
@@ -391,13 +393,12 @@ impl DaemonCore {
 
         let settings = self.current_session.user_settings.clone();
         let sender = self.event_channel.0.clone();
-
-        // 0: restart in place or rebuild the pipeline in current mode
-        // 1: rebuild the pipeline on system memory
-        // 2: start from scratch on system memory
-        let result = if !self.engine.has_portal() || attempt >= 2 {
+        let stalled = reason == "video stalled";
+        let result = if !self.engine.has_portal() || attempt >= 2 || (stalled && attempt >= 1) {
             log::warn!("recovery #{}: full rebuild ({reason})", attempt + 1);
-            self.engine.capture_mode = CaptureMode::SystemMemory;
+            if !stalled || attempt >= 2 {
+                self.engine.capture_mode = CaptureMode::SystemMemory;
+            }
             tokio::time::timeout(RECOVERY_TIMEOUT, self.engine.recover(&settings, sender)).await
         } else if attempt == 1 {
             log::warn!("recovery #2: rebuilding on system memory ({reason})");
