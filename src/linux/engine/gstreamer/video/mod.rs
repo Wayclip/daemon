@@ -2,10 +2,10 @@ use gstreamer::Element;
 use std::sync::Arc;
 use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 
+use crate::common::gst::guard::CaptureHealth;
 use crate::linux::engine::gstreamer::video::encoder::VideoEncoderFactory;
 use crate::linux::engine::gstreamer::video::parser::VideoParserFactory;
 use crate::linux::engine::gstreamer::video::preprocessor::VideoPreprocessFactory;
-use crate::common::gst::guard::CaptureHealth;
 use crate::linux::engine::gstreamer::{
     CaptureMode, DEFAULT_GST_LEAKY_DOWNSTREAM, DEFAULT_MAX_SIZE_BUFFER, DEFAULT_MAX_SIZE_BYTES,
     DEFAULT_MAX_SIZE_TIME_NS,
@@ -49,6 +49,7 @@ impl<'a> VideoBranchBuilder<'a> {
             fd: file_descriptor,
             path: node_id.into(),
             keepalive_ms: 1000 / self.user_settings.recording.video.fps.0 as i32,
+            always_copy: self.mode == CaptureMode::SystemMemory,
         })?;
 
         let video_queue_1 = Self::build_queue()?;
@@ -58,8 +59,7 @@ impl<'a> VideoBranchBuilder<'a> {
         // TODO: CHANGE
         let video_queue_3 = GStreamer::build_element(GStreamerElementType::AudioQueue)?;
 
-        let (mut elements, pre_encode_caps) =
-            VideoPreprocessFactory::build(
+        let (mut elements, pre_encode_caps) = VideoPreprocessFactory::build(
             pipewire_src,
             video_queue_1,
             self.user_settings,

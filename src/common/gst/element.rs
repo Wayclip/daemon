@@ -59,6 +59,7 @@ pub enum GStreamerElementType {
         fd: i32,
         path: Cow<'static, str>,
         keepalive_ms: i32,
+        always_copy: bool,
     },
 }
 
@@ -118,6 +119,7 @@ impl GStreamerElementType {
                 fd,
                 path,
                 keepalive_ms,
+                always_copy,
             } => GStreamerElement::new(
                 "pipewiresrc",
                 vec![
@@ -133,6 +135,10 @@ impl GStreamerElementType {
                     GStreamerElementProperty::new(
                         "keepalive-time",
                         GStreamerElementPropertyValue::typed(*keepalive_ms),
+                    ),
+                    GStreamerElementProperty::new(
+                        "always-copy",
+                        GStreamerElementPropertyValue::typed(*always_copy),
                     ),
                 ],
             ),

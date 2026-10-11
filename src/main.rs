@@ -3,6 +3,7 @@ use std::io::Write;
 use wayclip_daemon::linux::memory::MemoryManager;
 
 fn main() -> std::process::ExitCode {
+    MemoryManager::tune_allocator();
     unsafe {
         std::env::set_var("GLOBAL_HOTKEY_APP_ID", "com.wayclip.daemon");
         std::env::set_var("GST_GL_PLATFORM", "egl");

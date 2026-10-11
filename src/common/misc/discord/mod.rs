@@ -126,24 +126,25 @@ impl DiscordPresenceManager {
                     let activity = match command {
                         PresenceCommand::RecordingEvent { current_session } => match state_clone {
                             DiscordPresenceState::Default => {
-                                let mut activity = Activity::new().state("Recording");
+                                let mut activity = Activity::new().state("Recording Desktop");
 
                                 if let Some(g) = current_session.game.clone() {
                                     log::info!("{:?}", g);
-                                    let mut assets = Assets::new().small_text(g.name.clone());
+                                    let mut assets = Assets::new();
                                     if let Some(icon) = g.icon_url.clone() {
-                                        assets = assets.small_image(icon)
+                                        assets = assets
+                                            .large_image(icon)
+                                            .small_image("wayclip-logo")
+                                            .large_text(g.name.clone())
+                                            .small_text("Clipping with Wayclip")
                                     }
-                                    activity = activity.assets(assets);
+                                    activity = activity
+                                        .assets(assets)
+                                        .name(g.name)
+                                        .state("Clipping with Wayclip");
                                 }
 
                                 activity = activity
-                                    .details(
-                                        current_session
-                                            .game
-                                            .map(|g| g.name.clone())
-                                            .unwrap_or(String::from("Desktop")),
-                                    )
                                     .activity_type(ActivityType::Playing)
                                     // TODO: A way to disable promo
                                     .buttons(Self::get_recording_buttons(

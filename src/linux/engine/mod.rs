@@ -29,7 +29,7 @@ const DMABUF_RETRY_BACKOFF: [Duration; 4] = [
     Duration::from_secs(1800),
     Duration::from_secs(3600),
 ];
-const AUTO_RETRY_DMABUF: bool = true;
+const AUTO_RETRY_DMABUF: bool = false;
 
 pub mod gstreamer;
 pub mod pipewire;
