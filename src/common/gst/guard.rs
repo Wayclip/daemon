@@ -43,7 +43,15 @@ impl CaptureHealth {
     }
 }
 
-/// Will get all frames and drop any corruped ones or ones that dont meet the caps
+#[derive(Clone, Copy, Default)]
+struct Expected {
+    format: Option<VideoFormat>,
+    width: u32,
+    height: u32,
+    dmabuf: bool,
+}
+
+/// Basically, this is to fifnd faulty frames and drop them instead of causing a fatal error.
 pub struct VideoBufferGuard;
 
 impl VideoBufferGuard {
@@ -53,32 +61,42 @@ impl VideoBufferGuard {
             return;
         };
 
-        let expected: Arc<Mutex<Option<VideoFormat>>> = Arc::new(Mutex::new(None));
+        let expected: Arc<Mutex<Expected>> = Arc::new(Mutex::new(Expected::default()));
 
         pad.add_probe(
             PadProbeType::BUFFER | PadProbeType::EVENT_DOWNSTREAM,
             move |_, info| match &info.data {
                 Some(PadProbeData::Event(event)) => {
                     if let EventView::Caps(c) = event.view() {
-                        *expected.lock() = Self::format_of(c.caps());
+                        *expected.lock() = Self::expected_from(c.caps());
                     }
                     PadProbeReturn::Ok
                 }
                 Some(PadProbeData::Buffer(buffer)) => {
-                    let corrupt =
-                        buffer.flags().contains(BufferFlags::CORRUPTED) || buffer.n_memory() == 0;
+                    let want = *expected.lock();
+                    let n_mem = buffer.n_memory();
+                    let meta = buffer.meta::<gst_video::VideoMeta>();
 
-                    let mismatch = match (*expected.lock(), buffer.meta::<gst_video::VideoMeta>()) {
-                        (Some(want), Some(meta)) => {
-                            meta.format() != want && meta.format() != VideoFormat::DmaDrm
-                        }
-                        _ => false,
-                    };
+                    let corrupt = buffer.flags().contains(BufferFlags::CORRUPTED) || n_mem == 0;
 
-                    if corrupt || mismatch {
+                    let not_dmabuf =
+                        want.dmabuf && n_mem > 0 && !buffer.peek_memory(0).is_type("dmabuf");
+
+                    let mut mismatch = false;
+                    let mut too_many_mem = false;
+                    if let Some(meta) = meta.as_ref() {
+                        mismatch = want
+                            .format
+                            .is_some_and(|f| meta.format() != f && meta.format() != VideoFormat::DmaDrm)
+                            || (want.width != 0 && meta.width() < want.width)
+                            || (want.height != 0 && meta.height() < want.height);
+                        too_many_mem = (n_mem as u32) > meta.n_planes();
+                    }
+
+                    if corrupt || not_dmabuf || mismatch || too_many_mem {
                         if health.total_dropped() % 60 == 0 {
                             log::warn!(
-                                "dropping bad capture buffer (corrupt={corrupt} | caps format mismatch={mismatch} | total dropped={})",
+                                "dropping bad capture buffer. corrupt={corrupt} not_dmabuf={not_dmabuf} meta_mismatch={mismatch} too_many_mem={too_many_mem} total dropped={}",
                                 health.total_dropped() + 1
                             );
                         }
@@ -92,6 +110,28 @@ impl VideoBufferGuard {
                 _ => PadProbeReturn::Ok,
             },
         );
+    }
+
+    fn expected_from(caps: &gst::CapsRef) -> Expected {
+        let dmabuf = caps
+            .features(0)
+            .is_some_and(|f| f.contains("memory:DMABuf"));
+        let (width, height) = caps
+            .structure(0)
+            .map(|s| {
+                (
+                    s.get::<i32>("width").unwrap_or(0).max(0) as u32,
+                    s.get::<i32>("height").unwrap_or(0).max(0) as u32,
+                )
+            })
+            .unwrap_or((0, 0));
+
+        Expected {
+            format: Self::format_of(caps),
+            width,
+            height,
+            dmabuf,
+        }
     }
 
     fn format_of(caps: &gst::CapsRef) -> Option<VideoFormat> {

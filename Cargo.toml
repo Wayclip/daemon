@@ -30,6 +30,7 @@ gstreamer-gl = "0.25.2"
 gstreamer-gl-egl = "0.25.0"
 gstreamer-video = { version = "0.25", features = ["v1_24"] }
 ksni = "0.3.6"
+libc = "0.2.189"
 log = "0.4.33"
 nanoid = "0.5.0"
 parking_lot = "0.12.5"

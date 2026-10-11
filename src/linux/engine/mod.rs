@@ -113,6 +113,29 @@ impl DaemonEngine {
         self.capture_mode == CaptureMode::DmaBuf && self.health.is_degraded()
     }
 
+    pub fn has_portal(&self) -> bool {
+        self.pipewire_pipeline
+            .connection_data
+            .extract_data()
+            .is_ok()
+    }
+
+    pub fn video_flowing(&self) -> bool {
+        self.ring_buffer
+            .lock()
+            .video_last_instant
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+    }
+
+    pub async fn restart_pipeline(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<(), WayclipError> {
+        log::info!("rebuilding pipeline ({:?})", self.capture_mode);
+        self.rebuild_gstreamer(user_settings, sender).await
+    }
+
     pub fn dmabuf_retry_due(&self) -> bool {
         self.capture_mode == CaptureMode::SystemMemory
             && self.dmabuf_retry_at.is_some_and(|at| Instant::now() >= at)
@@ -220,6 +243,38 @@ impl DaemonEngine {
 
         self.gstreamer_pipeline = DaemonEngineGStreamer::new()?;
         self.setup(user_settings, sender).await
+    }
+
+    /// Restarts the *existing* pipeline instead of rebuilding it.
+    ///
+    /// A full `recover` allocates a fresh GL display, GL context and NVENC session, which is the
+    /// most expensive thing the daemon can do and the most likely to fail again when the failure
+    /// was caused by video memory being exhausted. Cycling the same pipeline through NULL and back
+    /// to PLAYING keeps every allocation, so a transient failure costs nothing but time.
+    pub async fn retry(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {
+        self.started_at = None;
+        self.stop_watcher();
+
+        if let Err(e) = self.pipewire_pipeline.stop().await {
+            log::warn!("closing portal session before retry: {e}");
+        }
+
+        {
+            let mut ring = self.ring_buffer.lock();
+            ring.begin_resync();
+            ring.video_last_instant = None;
+            ring.audio_last_instant = None;
+        }
+
+        // NULL resets the error state without discarding elements.
+        if let Err(e) = self.gstreamer_pipeline.stop() {
+            log::warn!("pipeline NULL before retry failed: {e}");
+        }
+
+        self.pipewire_pipeline.setup_screncast().await?;
+
+        self.watch(sender)?;
+        self.gstreamer_pipeline.start().await
     }
 
     fn watch(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {

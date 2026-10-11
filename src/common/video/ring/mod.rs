@@ -169,8 +169,14 @@ impl RingBuffer {
     // Re-Sync works by grabbing onto the last known frame and recording its PTS. This PTS is then
     // used to compare the new start pos and we can adjust correctly
     pub fn begin_resync(&mut self) {
-        self.video_resync_reference = self.video_frames.back().map(|f| f.pts);
-        self.audio_resync_reference = self.audio_frames.back().map(|f| f.pts);
+        let v = self.video_frames.back().map(|f| f.pts);
+        let a = self.audio_frames.back().map(|f| f.pts);
+        let common = match (v, a) {
+            (Some(v), Some(a)) => Some(v.max(a)),
+            (v, a) => v.or(a),
+        };
+        self.video_resync_reference = common;
+        self.audio_resync_reference = common;
         self.awaiting_video_resync = true;
         self.awaiting_audio_resync = true;
 

@@ -5804,6 +5804,7 @@ dependencies = [
  "gstreamer-gl-egl",
  "gstreamer-video",
  "ksni",
+ "libc",
  "log",
  "nanoid",
  "parking_lot",

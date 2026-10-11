@@ -1,6 +1,5 @@
 use sd_notify::NotifyState;
 use std::{
-    collections::VecDeque,
     io::IsTerminal,
     process::exit,
     time::{Duration, Instant},
@@ -33,17 +32,32 @@ use crate::{
             },
         },
         ipc::{DaemonIpc, commands::IpcCommand},
+        memory::MemoryManager,
         services::DaemonServices,
         session::CurrentSession,
     },
 };
 
-const MAX_RECOVERIES: usize = 3;
-const RECOVERY_WINDOW: Duration = Duration::from_secs(300);
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+const RECOVERY_BACKOFF: [Duration; 6] = [
+    Duration::from_secs(0),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(10),
+    Duration::from_secs(20),
+    Duration::from_secs(30),
+];
+const HEALTHY_RESET: Duration = Duration::from_secs(30);
+const REASONS: [&str; 4] = [
+    "out_of_memory",
+    "out of memory",
+    "failed to upload buffer",
+    "not_supported_device",
+];
 
 pub mod engine;
 pub mod ipc;
+pub mod memory;
 pub mod services;
 pub mod session;
 
@@ -69,8 +83,12 @@ pub struct DaemonCore {
     /// We also setup another channel to communicate with Saves so that they can run in BG and they
     /// dont block main pipeline
     save_channel: (mpsc::Sender<SaveDone>, mpsc::Receiver<SaveDone>),
-    /// We track all the recoveries we attempted
-    recoveries: VecDeque<Instant>,
+    /// How many recoveries in a row were needed. Picks the backoff delay and how drastic the next
+    /// recovery is. Reset once video has been flowing for HEALTHY_RESET.
+    recovery_attempt: usize,
+    /// A recovery that has been asked for and runs once its delay has passed
+    recovery_due: Option<(Instant, String)>,
+    healthy_since: Option<Instant>,
 }
 
 impl DaemonCore {
@@ -94,7 +112,9 @@ impl DaemonCore {
             cancel_token,
             event_channel,
             save_channel,
-            recoveries: VecDeque::new(),
+            recovery_attempt: 0,
+            recovery_due: None,
+            healthy_since: None,
         })
     }
 
@@ -120,6 +140,11 @@ impl DaemonCore {
         }
 
         self.update_status(DaemonStatus::Active)?;
+
+        if MemoryManager::memlog_enabled() {
+            let ring = self.engine.ring();
+            tokio::spawn(MemoryManager::run_memlog(Instant::now(), ring));
+        }
 
         // After succesful start, we start our infinite event loop
         self.event_loop(self.cancel_token.clone()).await
@@ -208,7 +233,7 @@ impl DaemonCore {
                         CoreEvent::PipelineError(m) => m,
                         CoreEvent::PipelineEos => "unexpected EOS".to_string(),
                     };
-                    self.handle_pipeline_failure(&reason).await;
+                    self.schedule_recovery(&reason);
                 }
 
                 Some(SaveDone { result, responder }) = self.save_channel.1.recv() => {
@@ -240,11 +265,14 @@ impl DaemonCore {
                         log::error!("service update failed: {e}");
                     }
                     if self.status == DaemonStatus::Active {
-                        if self.engine.capture_degraded() {
-                            self.downgrade_capture("guard dropped every frame").await;
+                        self.track_health();
+                        if self.recovery_due.is_some() {
+                            self.run_due_recovery().await;
+                        } else if self.engine.capture_degraded() {
+                            self.schedule_recovery("guard dropped every frame");
                         } else if self.engine.is_stalled(STALL_LIMIT) {
-                            log::error!("no video frames for {}s", STALL_LIMIT.as_secs());
-                            self.handle_pipeline_failure("video stalled").await;
+                            log::warn!("no video frames for {}s", STALL_LIMIT.as_secs());
+                            self.schedule_recovery("video stalled");
                         } else if self.engine.dmabuf_retry_due() {
                             self.retry_dmabuf().await;
                         }
@@ -318,30 +346,91 @@ impl DaemonCore {
         Ok(())
     }
 
-    /// Cheap downgrade
-    async fn handle_pipeline_failure(&mut self, reason: &str) {
-        if self.engine.capture_mode == CaptureMode::DmaBuf {
-            self.downgrade_capture(reason).await;
+    // ---  Recovery ---
+    // TODO: MOVE TO SOME DIFF MODULE?
+
+    /// Track how long video has been flowing
+    fn track_health(&mut self) {
+        if self.engine.video_flowing() {
+            let since = *self.healthy_since.get_or_insert_with(Instant::now);
+            if self.recovery_attempt > 0 && since.elapsed() >= HEALTHY_RESET {
+                log::info!("video healthy again, resetting recovery ladder");
+                self.recovery_attempt = 0;
+            }
         } else {
-            self.try_recover(reason).await;
+            self.healthy_since = None;
         }
     }
 
-    async fn downgrade_capture(&mut self, reason: &str) {
+    /// Ask for a recovery. This will never block or fail..
+    fn schedule_recovery(&mut self, reason: &str) {
+        if self.recovery_due.is_some() {
+            return;
+        }
+        let delay = RECOVERY_BACKOFF[self.recovery_attempt.min(RECOVERY_BACKOFF.len() - 1)];
+        log::warn!(
+            "pipeline problem ({reason}); recovery #{} in {}s",
+            self.recovery_attempt + 1,
+            delay.as_secs()
+        );
+        self.recovery_due = Some((Instant::now() + delay, reason.to_string()));
+    }
+
+    fn is_video_memory_failure(reason: &str) -> bool {
+        let reason = reason.to_ascii_lowercase();
+        REASONS.iter().any(|needle| reason.contains(needle))
+    }
+
+    async fn run_due_recovery(&mut self) {
+        let Some((_, reason)) = self.recovery_due.take_if(|(due, _)| Instant::now() >= *due) else {
+            return;
+        };
+
+        let attempt = self.recovery_attempt;
+        self.recovery_attempt += 1;
+
         let settings = self.current_session.user_settings.clone();
         let sender = self.event_channel.0.clone();
-        let res = tokio::time::timeout(
-            RECOVERY_TIMEOUT,
-            self.engine
-                .downgrade_to_system_memory(&settings, sender, reason),
-        )
-        .await;
 
-        match res {
-            Ok(Ok(())) => while self.event_channel.1.try_recv().is_ok() {},
+        // 0: restart in place or rebuild the pipeline in current mode
+        // 1: rebuild the pipeline on system memory
+        // 2: start from scratch on system memory
+        let result = if !self.engine.has_portal() || attempt >= 2 {
+            log::warn!("recovery #{}: full rebuild ({reason})", attempt + 1);
+            self.engine.capture_mode = CaptureMode::SystemMemory;
+            tokio::time::timeout(RECOVERY_TIMEOUT, self.engine.recover(&settings, sender)).await
+        } else if attempt == 1 {
+            log::warn!("recovery #2: rebuilding on system memory ({reason})");
+            tokio::time::timeout(
+                RECOVERY_TIMEOUT,
+                self.engine
+                    .downgrade_to_system_memory(&settings, sender, &reason),
+            )
+            .await
+        } else if Self::is_video_memory_failure(&reason) {
+            log::warn!("recovery #1: in-place restart ({reason})");
+            tokio::time::timeout(RECOVERY_TIMEOUT, self.engine.retry(sender)).await
+        } else {
+            log::warn!("recovery #1: rebuilding pipeline ({reason})");
+            tokio::time::timeout(
+                RECOVERY_TIMEOUT,
+                self.engine.restart_pipeline(&settings, sender),
+            )
+            .await
+        };
+
+        match result {
+            Ok(Ok(())) => {
+                while self.event_channel.1.try_recv().is_ok() {}
+                self.healthy_since = None;
+                log::info!("recovery #{} done", attempt + 1);
+            }
             other => {
-                log::error!("fast fallback failed ({other:?}), doing full recovery");
-                self.try_recover(reason).await;
+                log::error!(
+                    "recovery #{} failed ({other:?}), will try again",
+                    attempt + 1
+                );
+                self.schedule_recovery("previous recovery failed");
             }
         }
     }
@@ -359,46 +448,9 @@ impl DaemonCore {
             Ok(Ok(())) => while self.event_channel.1.try_recv().is_ok() {},
             other => {
                 log::warn!("DMABuf retry failed to start ({other:?}). staying on system memory");
-                self.downgrade_capture("dmabuf retry failed").await;
+                self.engine.capture_mode = CaptureMode::SystemMemory;
+                self.schedule_recovery("dmabuf retry failed");
             }
         }
-    }
-
-    async fn try_recover(&mut self, reason: &str) {
-        if let Err(e) = self.recover(reason).await {
-            log::error!("unrecoverable ({e}) exiting...");
-            let _ = self.stop().await;
-            exit(1);
-        }
-    }
-
-    async fn recover(&mut self, reason: &str) -> Result<(), WayclipError> {
-        let now = Instant::now();
-        self.recoveries
-            .retain(|t| now.duration_since(*t) < RECOVERY_WINDOW);
-        if self.recoveries.len() >= MAX_RECOVERIES {
-            return Err(WayclipError::Validation(
-                format!(
-                    "{MAX_RECOVERIES} recoveries in {}s. last: {reason}",
-                    RECOVERY_WINDOW.as_secs()
-                )
-                .into(),
-            ));
-        }
-
-        self.recoveries.push_back(now);
-
-        log::warn!("recovering: {reason}");
-        //self.update_status(DaemonStatus::Activating);
-        self.engine.stop_watcher();
-
-        let settings = self.current_session.user_settings.clone();
-        let sender = self.event_channel.0.clone();
-        tokio::time::timeout(RECOVERY_TIMEOUT, self.engine.recover(&settings, sender))
-            .await
-            .map_err(|_| WayclipError::Validation("recovery timed out".into()))??;
-
-        while self.event_channel.1.try_recv().is_ok() {}
-        Ok(())
     }
 }
