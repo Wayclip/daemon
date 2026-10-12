@@ -12,11 +12,11 @@ Wayclip daemon provides the functionality to record and process data.
 
 | Package Name                 | Required? | Minimum Version | Notes                                                                         |
 | ---------------------------- | --------- | --------------- | ----------------------------------------------------------------------------- |
-| `gstreamer-1.0`              | Yes       | `>= 1.14`       | Required by `gstreamer`, `gstreamer-app`, `gstreamer-pbutils`                 |
-| `gstreamer-plugins-base-1.0` | Yes       | `>= 1.14`       | Provides elements like `appsrc`, `videoconvert`, `videoscale`, etc...         |
-| `gstreamer-plugins-good`     | Yes       | `>= 1.14`       | Provides elements like `matroskamux` & `watchdog`                             |
-| `gstreamer-plugins-bad`      | Yes       | `>= 1.14`       | Provides encoders like `h264parse`, `vah264enc` (VAAPI), `nvh264enc` (NVIDIA) |
-| `gstreamer-plugins-ugly`     | Yes       | `>= 1.14`       | Provides software encoder `x264enc`                                           |
+| `gstreamer-1.0`              | Yes       | `>= 1.24`       | Required by `gstreamer`, `gstreamer-app`                                      |
+| `gstreamer-plugins-base-1.0` | Yes       | `>= 1.24`       | Provides elements like `appsrc`, `videoconvert`, `videoscale`, etc...         |
+| `gstreamer-plugins-good`     | Yes       | `>= 1.24`       | Provides elements like `matroskamux` & `watchdog`                             |
+| `gstreamer-plugins-bad`      | Yes       | `>= 1.24`       | Provides encoders like `h264parse`, `vah264enc` (VAAPI), `nvh264enc` (NVIDIA) |
+| `gstreamer-plugins-ugly`     | Yes       | `>= 1.24`       | Provides software encoder `x264enc`                                           |
 | `libpipewire-0.3`            | Yes       | `>= 0.3.0`      | Required by `pipewire`                                                        |
 | `libudev`                    | Yes       | `>= 199`        | Required by `gilrs`                                                           |
 | `alsa-lib`                   | Yes       | `>= 1.0.27`     | Required by `rodio`                                                           |
@@ -37,7 +37,7 @@ The runtime-required `gstreamer` packages can be checked via the `wayclip-cli` b
 
 | Platform                  | Status    | Notes                                                                           |
 | ------------------------- | --------- | ------------------------------------------------------------------------------- |
-| Linux (Wayland/Hyprland)  | Supported | Key-Binding done via `hyprctl`                                                  |
+| Linux (Wayland/Hyprland)  | Supported | Key-Binding done via `hyprctl`. Requires Hyprland v0.55+ for lua                |
 | Linux (Wayland/Sway)      | Supported | Key-Binding done via `swaymsg`                                                  |
 | Linux (Wayland/GNOME/KDE) | Supported | Key-Binding done via `wayclip-global-hotkey`. Window Discovery done via `gdbus` |
 | Linux (Wayland/Other)     | Supported | Key-Binding not supported                                                       |

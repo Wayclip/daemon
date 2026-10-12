@@ -48,7 +48,7 @@ impl<'a> VideoBranchBuilder<'a> {
             do_timestamp: DEFAULT_APPSRC_DO_TIMESTAMP,
             fd: file_descriptor,
             path: node_id.into(),
-            keepalive_ms: 1000 / self.user_settings.recording.video.fps.0 as i32,
+            keepalive_ms: 1000 / self.user_settings.recording.video.fps.0.max(1) as i32,
             always_copy: self.mode == CaptureMode::SystemMemory,
         })?;
 

@@ -3,7 +3,7 @@ use crate::{
         GStreamer, app::DEFAULT_APPSRC_DO_TIMESTAMP, caps::GStreamerCapsType,
         element::GStreamerElementType, pipeline::GStreamerPipeline,
     },
-    linux::engine::gstreamer::audio::{DEFAULT_AUDIO_CHANNELS, DefaultDeviceType},
+    linux::engine::gstreamer::audio::DEFAULT_AUDIO_CHANNELS,
 };
 use gstreamer::{
     Element,
@@ -34,84 +34,81 @@ impl AudioDeviceFactory {
         mixer: &Element,
         manager: &PipewireManager,
     ) -> Result<(), WayclipError> {
-        let state = manager.current_state();
         let audio = &user_settings.recording.audio;
-        if !audio.background.enabled && !audio.microphone.enabled {
-            return Ok(());
-        }
 
         if audio.background.enabled {
-            let (node_name, node_level) = match manager
-                // TODO: Fix many enums for Sink/Source/Microphone/Background/Unknown
-                .is_node_name_valid(&audio.background.node_name, PipewireNodeType::Sink)
-            {
-                true => (&audio.background.node_name, audio.background.level.0),
-                false => {
-                    log::error!(
-                        "Audio device {} doesnt exist. Falling back to system defaults.",
-                        audio.background.node_name
-                    );
-                    (
-                        &state
-                            .default_sink
-                            .ok_or_else(|| WayclipError::NotFound("No default sink found".into()))?
-                            .node_name,
-                        audio.background.level.0,
-                    )
-                }
-            };
-
-            let node_id = manager
-                .get_node_id_from_node_name(node_name)
-                .ok_or_else(|| WayclipError::NotFound("No ID found for the sink".into()))?;
-
-            Self::setup_audio_device(
+            if let Err(e) = Self::attach(
                 pipeline,
                 user_settings,
-                node_id,
-                node_level,
-                DefaultDeviceType::Background,
+                &audio.background.node_name,
+                PipewireNodeType::Sink,
+                audio.background.level.0,
                 mixer,
-            )?;
+                manager,
+            ) {
+                log::error!("Desktop audio disabled: {e}");
+            }
         }
 
         if audio.microphone.enabled {
-            let (node_name, node_level) = match manager
-                .is_node_name_valid(&audio.microphone.node_name, PipewireNodeType::Source)
-            {
-                true => (&audio.microphone.node_name, audio.microphone.level.0),
-                false => {
-                    log::error!(
-                        "Audio device {} doesnt exist. Falling back to system defaults.",
-                        audio.microphone.node_name
-                    );
-                    (
-                        &state
-                            .default_source
-                            .ok_or_else(|| {
-                                WayclipError::NotFound("No default source found".into())
-                            })?
-                            .node_name,
-                        audio.microphone.level.0,
-                    )
-                }
-            };
-
-            let node_id = manager
-                .get_node_id_from_node_name(node_name)
-                .ok_or_else(|| WayclipError::NotFound("No ID found for the source".into()))?;
-
-            Self::setup_audio_device(
+            if let Err(e) = Self::attach(
                 pipeline,
                 user_settings,
-                node_id,
-                node_level,
-                DefaultDeviceType::Microphone,
+                &audio.microphone.node_name,
+                PipewireNodeType::Source,
+                audio.microphone.level.0,
                 mixer,
-            )?;
+                manager,
+            ) {
+                log::error!("microphone audio disabled: {e}");
+            }
         }
 
         Ok(())
+    }
+
+    fn attach(
+        pipeline: &GStreamerPipeline,
+        user_settings: &UserSettings,
+        audio_node_name: &str,
+        audio_node_type: PipewireNodeType,
+        audio_node_level: f64,
+        mixer: &Element,
+        manager: &PipewireManager,
+    ) -> Result<(), WayclipError> {
+        let state = manager.current_state();
+        let name = if manager.is_node_name_valid(audio_node_name, audio_node_type) {
+            audio_node_name.to_string()
+        } else {
+            log::warn!(
+                "Audio device {} not found, using system default",
+                audio_node_name
+            );
+
+            let default = match audio_node_type {
+                PipewireNodeType::Sink => state.default_sink,
+                PipewireNodeType::Source => state.default_source,
+            };
+
+            default
+                .ok_or_else(|| {
+                    WayclipError::NotFound(format!("No default {:?} found", audio_node_type).into())
+                })?
+                .node_name
+        };
+
+        let id = manager
+            .get_node_id_from_node_name(&name)
+            .ok_or_else(|| WayclipError::NotFound("No ID found for the sink".into()))?;
+
+        Self::setup_audio_device(
+            pipeline,
+            user_settings,
+            id,
+            audio_node_level,
+            audio_node_type,
+            mixer,
+        )
     }
 
     /// This method will solely use minimal information provided to link up the correct audio device
@@ -124,14 +121,14 @@ impl AudioDeviceFactory {
         user_settings: &UserSettings,
         audio_node_id: u32,
         audio_node_level: f64,
-        audio_node_type: DefaultDeviceType,
+        audio_node_type: PipewireNodeType,
         mixer: &Element,
     ) -> Result<(), WayclipError> {
         let pipewire_src = GStreamer::build_element(GStreamerElementType::AudioPipewireSrc {
             do_timestamp: DEFAULT_APPSRC_DO_TIMESTAMP,
             // Passing ID seems like the correct choice
             target_object: audio_node_id.to_string().into(),
-            sink: audio_node_type.is_sink(),
+            sink: audio_node_type == PipewireNodeType::Sink,
         })?;
 
         let queue = GStreamer::build_element(GStreamerElementType::AudioQueue)?;

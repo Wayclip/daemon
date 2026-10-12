@@ -254,27 +254,27 @@ impl DaemonEngine {
     pub async fn retry(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {
         self.started_at = None;
         self.stop_watcher();
-
-        if let Err(e) = self.pipewire_pipeline.stop().await {
-            log::warn!("closing portal session before retry: {e}");
-        }
-
         {
             let mut ring = self.ring_buffer.lock();
             ring.begin_resync();
             ring.video_last_instant = None;
             ring.audio_last_instant = None;
         }
+        self.health.reset();
 
-        // NULL resets the error state without discarding elements.
-        if let Err(e) = self.gstreamer_pipeline.stop() {
+        let p = self.gstreamer_pipeline.pipeline.clone();
+        if let Ok(Err(e)) | Err(e) =
+            tokio::task::spawn_blocking(move || p.set_state(::gstreamer::State::Null))
+                .await
+                .map_err(|e| WayclipError::Validation(e.to_string().into()))
+        {
             log::warn!("pipeline NULL before retry failed: {e}");
         }
 
-        self.pipewire_pipeline.setup_screncast().await?;
-
         self.watch(sender)?;
-        self.gstreamer_pipeline.start().await
+        self.gstreamer_pipeline.start().await?;
+        self.started_at = Some(Instant::now());
+        Ok(())
     }
 
     fn watch(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {

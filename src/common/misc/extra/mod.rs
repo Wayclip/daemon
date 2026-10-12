@@ -19,9 +19,9 @@ pub enum FormatMode {
 impl FormatMode {
     pub fn get_formatting_string(&self) -> &'static str {
         match self {
-            // Wednesday, September 23, 2026 at 07:05:42 PM ICT (+07:00)
+            // Wednesday, September 23, 2026 at 07:05:42 PM (+07:00)
             FormatMode::Exhaustive => "%A, %B %-d, %Y at %I:%M:%S %p %Z (%:z)",
-            // Sep 23, 2026, 07:05 PM ICT
+            // Sep 23, 2026, 07:05 PM
             FormatMode::Default => "%b %-d, %Y, %I:%M %p %Z",
             // 09/23/26 19:05
             FormatMode::Minimal => "%m/%d/%y %H:%M",

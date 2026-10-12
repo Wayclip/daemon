@@ -3,15 +3,16 @@ use ashpd::{
         CreateSessionOptions, PersistMode, Session,
         screencast::{
             CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
-            StartCastOptions, Streams,
+            StartCastOptions,
         },
     },
     enumflags2::BitFlags,
 };
 use std::{
-    fs::{create_dir_all, read_to_string, write},
+    fs::{create_dir_all, read_to_string},
     os::fd::{AsRawFd, OwnedFd},
 };
+use std::{io::Write, os::unix::fs::OpenOptionsExt};
 use wayclip_core::models::{daemon::pipewire::PipewireManager, error::WayclipError};
 
 const DEFAULT_SOURCE_TYPE: SourceType = SourceType::Monitor;
@@ -77,27 +78,27 @@ impl DaemonEnginePipewire {
 
     // Our main entry point to setup screencast
     pub async fn setup_screncast(&mut self) -> Result<(), WayclipError> {
+        // Attempt to load an existing token from ~/.local/state
+        let existing_token = self.load_restore_token()?;
+
         // Create proxy & session so we can communicate with xdg-portal and call methods
         let proxy = Screencast::new().await?;
         let session = proxy
             .create_session(CreateSessionOptions::default())
             .await?;
 
-        // Try to get avaialble modes
-        let mode = if proxy
-            .available_cursor_modes()
-            .await?
-            .contains(DEFAULT_CURSOR_MODE)
-        {
-            DEFAULT_CURSOR_MODE
-        } else {
-            CursorMode::Hidden
-        };
-
-        // Attempt to load an existing token from ~/.local/state
-        let existing_token = self.load_restore_token()?;
-
         let result = async {
+            // Try to get avaialble modes
+            let mode = if proxy
+                .available_cursor_modes()
+                .await?
+                .contains(DEFAULT_CURSOR_MODE)
+            {
+                DEFAULT_CURSOR_MODE
+            } else {
+                CursorMode::Hidden
+            };
+
             let select_sources_options = SelectSourcesOptions::default()
                 .set_cursor_mode(mode)
                 .set_restore_token(existing_token.as_deref())
@@ -125,7 +126,7 @@ impl DaemonEnginePipewire {
                 .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
                 .await?;
 
-            Ok::<(Streams, String, OwnedFd), WayclipError>((streams, node_id, file_descriptor))
+            Ok::<_, WayclipError>((streams, node_id, file_descriptor))
         }
         .await;
 
@@ -173,7 +174,14 @@ impl DaemonEnginePipewire {
         if let Some(parent) = path.parent() {
             create_dir_all(parent)?;
         }
-        write(path, token)?;
+
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)?;
+        f.write_all(token.as_bytes())?;
 
         Ok(())
     }

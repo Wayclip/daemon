@@ -129,7 +129,6 @@ impl DiscordPresenceManager {
                                 let mut activity = Activity::new().state("Recording Desktop");
 
                                 if let Some(g) = current_session.game.clone() {
-                                    log::info!("{:?}", g);
                                     let mut assets = Assets::new();
                                     if let Some(icon) = g.icon_url.clone() {
                                         assets = assets

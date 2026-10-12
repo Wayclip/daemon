@@ -59,7 +59,7 @@ impl Discovery {
         focused_pid: Option<u32>,
         previous: Option<&Game>,
     ) -> Option<Game> {
-        // 1. Stickiness: if we already have a game and it's still running, keep it.
+        // Stickiness: if we already have a game and it's still running, keep it.
         if let Some(prev) = previous {
             if candidates.iter().any(|c| &c.game == prev) {
                 return Some(prev.clone());
@@ -71,22 +71,16 @@ impl Discovery {
             .into_iter()
             .partition(|c| c.game.steam_appid.is_some());
 
-        // 2. Try to pick based on focused window + ancestors, preferring Steam games.
         if let Some(focused_pid) = focused_pid {
             let chain = Scanner::ancestors(focused_pid);
-
-            // First, try Steam games in the ancestor chain
             if let Some(candidate) = steam_candidates.iter().find(|c| chain.contains(&c.pid)) {
                 return Some(candidate.game.clone());
             }
-
-            // Then, try any game in the ancestor chain
             if let Some(candidate) = other_candidates.iter().find(|c| chain.contains(&c.pid)) {
                 return Some(candidate.game.clone());
             }
         }
 
-        // 3. No focus-based match: prefer Steam games, then the oldest-running one.
         steam_candidates
             .into_iter()
             .max_by_key(|c| c.start)

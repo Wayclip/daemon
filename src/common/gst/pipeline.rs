@@ -1,14 +1,14 @@
+use crate::common::gst::bus::{BusWatcher, CoreEvent};
 use gstreamer::{
     ClockTime, Element, MessageType, MessageView, State, StateChangeSuccess,
     glib::object::{Cast, IsA},
     prelude::{ElementExt, ElementExtManual, GstBinExt, GstObjectExt},
 };
 use gstreamer_gl::{GL_DISPLAY_CONTEXT_TYPE, prelude::ContextGLExt};
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use wayclip_core::models::error::WayclipError;
-
-use crate::common::gst::bus::{BusWatcher, CoreEvent};
 
 #[derive(Clone, Debug)]
 pub struct GStreamerPipeline {
@@ -73,7 +73,7 @@ impl GStreamerPipeline {
     pub fn add(&self, element: &impl IsA<Element>) -> Result<(), WayclipError> {
         let element = element.upcast_ref::<Element>();
         self.pipeline.add(element)?;
-        self.tracked_elements.lock().unwrap().push(element.clone());
+        self.tracked_elements.lock().push(element.clone());
         Ok(())
     }
 
@@ -81,7 +81,7 @@ impl GStreamerPipeline {
         &self,
         elements: impl IntoIterator<Item = &'a T>,
     ) -> Result<(), WayclipError> {
-        let mut tracked = self.tracked_elements.lock().unwrap();
+        let mut tracked = self.tracked_elements.lock();
         for element in elements {
             let elem = element.upcast_ref::<Element>();
             self.pipeline.add(elem)?;
@@ -126,7 +126,7 @@ impl GStreamerPipeline {
     }
 
     pub fn link_all(&self) -> Result<(), WayclipError> {
-        let tracked = self.tracked_elements.lock().unwrap();
+        let tracked = self.tracked_elements.lock();
         for window in tracked.windows(2) {
             self.link(&window[0], &window[1])?;
         }
@@ -134,7 +134,7 @@ impl GStreamerPipeline {
     }
 
     pub fn last_element(&self) -> Option<Element> {
-        self.tracked_elements.lock().unwrap().last().cloned()
+        self.tracked_elements.lock().last().cloned()
     }
 
     pub fn wait_eos(self, timeout: ClockTime) -> Result<(), WayclipError> {

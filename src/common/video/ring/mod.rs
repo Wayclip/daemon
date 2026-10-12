@@ -251,27 +251,27 @@ impl RingBuffer {
                     .saturating_sub(popped.payload.size());
             }
 
-            // Prune audio lagging behind the oldest video frame (-100ms tolerance)
-            if let (Some(oldest_video), Some(audio_first)) =
-                (self.video_frames.front(), self.audio_first_pts)
-            {
-                // get the threshold at which we gotta eliminate the audio frames by subtracting the
-                // first pts from oldest frame and adding 100ms
-                let video_pts = oldest_video
+            // Prune audio lagging behind the oldest video frame
+            if let Some(oldest_video) = self.video_frames.front() {
+                let threshold = oldest_video
                     .pts
-                    .saturating_sub(self.video_first_pts.unwrap_or(ClockTime::ZERO));
-                let threshold = video_pts.saturating_sub(ClockTime::from_mseconds(100));
-
-                // Go through each audio frame, compare, pop, update data
-                while let Some(audio) = self.audio_frames.front() {
-                    if audio.pts.saturating_sub(audio_first) < threshold {
-                        if let Some(popped) = self.audio_frames.pop_front() {
-                            self.total_buffer_bytes = self
-                                .total_buffer_bytes
-                                .saturating_sub(popped.payload.size());
-                        }
-                    } else {
-                        break;
+                    .saturating_sub(ClockTime::from_mseconds(100));
+                if self.audio_frames.back().is_some_and(|a| {
+                    a.pts.saturating_add(ClockTime::from_seconds(5)) < oldest_video.pts
+                }) {
+                    static WARNED: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        log::warn!(
+                            "audio and video PTS are on different timelines (gap > 5s). not pruning audio"
+                        );
+                    }
+                    continue;
+                }
+                while self.audio_frames.front().is_some_and(|a| a.pts < threshold) {
+                    if let Some(p) = self.audio_frames.pop_front() {
+                        self.total_buffer_bytes =
+                            self.total_buffer_bytes.saturating_sub(p.payload.size());
                     }
                 }
             }
@@ -323,7 +323,9 @@ impl RingBuffer {
             .video_frames
             .iter()
             .position(|f| f.is_keyframe)
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                WayclipError::Ring("No keyframe in buffer yet, try again in a moment".into())
+            })?;
 
         if keyframe_idx > 0 {
             log::debug!("Skipping {} frames before first keyframe", keyframe_idx);
@@ -356,31 +358,43 @@ impl RingBuffer {
             duration.mseconds()
         );
 
-        // Add 100ms threshold to both start and end
-        let threshold_start = video_start_pts.saturating_sub(ClockTime::from_mseconds(100));
-        let threshold_end = video_end_pts.saturating_add(ClockTime::from_mseconds(100));
-        let audio_first_pts = self.audio_first_pts.unwrap_or(ClockTime::ZERO);
+        let video_start = video_frames
+            .first()
+            .map(|f| f.pts)
+            .unwrap_or(ClockTime::ZERO);
+        let video_last = video_frames.last();
+        let video_end = video_last.map(|f| f.pts).unwrap_or(ClockTime::ZERO);
+        let duration = video_end.saturating_sub(video_start);
 
-        // Filter out the frames so they fit the new video length
+        let tail = video_last
+            .and_then(|f| f.duration)
+            .unwrap_or(ClockTime::from_mseconds(34));
+        let video_stop = video_end.saturating_add(tail);
+
+        let mut audio_start_idx = self
+            .audio_frames
+            .iter()
+            .rposition(|a| a.pts <= video_start)
+            .unwrap_or(0);
+        if let Some(a) = self.audio_frames.get(audio_start_idx) {
+            let a_end = a.pts.saturating_add(a.duration.unwrap_or(ClockTime::ZERO));
+            if a.pts < video_start && a_end <= video_start {
+                audio_start_idx += 1;
+            }
+        }
         let audio_frames: Vec<EncodedFrame> = self
             .audio_frames
             .iter()
-            .filter(|frame| {
-                let pts = frame.pts.saturating_sub(audio_first_pts);
-                pts >= threshold_start && pts <= threshold_end
-            })
+            .skip(audio_start_idx)
+            .take_while(|a| a.pts < video_stop)
             .cloned()
             .collect();
 
-        // Get the offset needed & return all the data
-        let sync_offset_ms = self.calculate_sync_offset_ms();
-
         log::debug!(
-            "Draining {} video frames, {} audio frames, duration of {}s ({}ms offset)",
+            "Draining {} video frames, {} audio frames, duration of {}s",
             video_frames.len(),
             audio_frames.len(),
             duration.seconds(),
-            sync_offset_ms
         );
 
         Ok(SaveData {
@@ -389,8 +403,13 @@ impl RingBuffer {
             video_caps,
             audio_caps: self.audio_caps.clone(),
             duration,
-            sync_offset_ms,
         })
+    }
+
+    pub fn flush_frames(&mut self) {
+        self.video_frames.clear();
+        self.audio_frames.clear();
+        self.total_buffer_bytes = 0;
     }
 
     fn buffer_duration(&self, frames: &VecDeque<EncodedFrame>) -> ClockTime {
@@ -416,13 +435,7 @@ impl RingBuffer {
     fn calculate_av_drift_str(&self) -> String {
         match (self.video_frames.back(), self.audio_frames.back()) {
             (Some(v), Some(a)) => {
-                let v_pts = v
-                    .pts
-                    .saturating_sub(self.video_first_pts.unwrap_or(ClockTime::ZERO));
-                let a_pts = a
-                    .pts
-                    .saturating_sub(self.audio_first_pts.unwrap_or(ClockTime::ZERO));
-
+                let (v_pts, a_pts) = (v.pts, a.pts);
                 if a_pts >= v_pts {
                     format!("+{}ms", (a_pts.saturating_sub(v_pts)).mseconds())
                 } else {
@@ -430,18 +443,6 @@ impl RingBuffer {
                 }
             }
             _ => "syncing".to_string(),
-        }
-    }
-
-    // Small offset calculation function
-    fn calculate_sync_offset_ms(&self) -> i64 {
-        match (self.video_start_instant, self.audio_start_instant) {
-            (Some(v), Some(a)) if a >= v => a.duration_since(v).as_millis() as i64,
-            (Some(v), Some(a)) => -(v.duration_since(a).as_millis() as i64),
-            _ => {
-                log::warn!("missing starting instants, audio may be de-synced");
-                0
-            }
         }
     }
 

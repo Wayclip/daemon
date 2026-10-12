@@ -21,13 +21,12 @@ use crate::linux::engine::gstreamer::video::VideoBranchBuilder;
 use crate::linux::engine::pipewire::DaemonEngineConnectionData;
 use wayclip_core::settings::recording::CodecType;
 
-const DEFAULT_CONFIG_INTERVAL: i32 = 1;
+// P.S Before was `1`
+const DEFAULT_CONFIG_INTERVAL: i32 = -1;
 const DEFAULT_GST_LEAKY_DOWNSTREAM: &str = "2";
 const DEFAULT_MAX_SIZE_BUFFER: u32 = 2;
 const DEFAULT_MAX_SIZE_BYTES: u32 = 0;
 const DEFAULT_MAX_SIZE_TIME_NS: u64 = 0;
-const DEFAULT_GOP_SIZE: i32 = 30;
-const DEFAULT_KEYFRAME_PERIOD: u32 = 30;
 
 pub mod audio;
 pub mod save;
@@ -174,7 +173,19 @@ impl DaemonEngineGStreamer {
                 let buffer_ref = sample.buffer().ok_or(gstreamer::FlowError::Error)?;
 
                 let caps = sample.caps().map(|caps| caps.to_owned());
-                let mut pts = buffer_ref.pts().ok_or(gstreamer::FlowError::Error)?;
+                let Some(raw_pts) = buffer_ref.pts().or_else(|| buffer_ref.dts()) else {
+                    return Ok(gstreamer::FlowSuccess::Ok);
+                };
+
+                let segment_shift_ns: i64 = sample
+                    .segment()
+                    .and_then(|s| s.downcast_ref::<ClockTime>())
+                    .and_then(|s| Option::<ClockTime>::from(s.to_running_time(raw_pts)))
+                    .map(|rt| rt.nseconds() as i64 - raw_pts.nseconds() as i64)
+                    .unwrap_or(0);
+                let mut pts = ClockTime::from_nseconds(
+                    (raw_pts.nseconds() as i64 + segment_shift_ns).max(0) as u64,
+                );
 
                 let mut ring = ring.lock();
 
@@ -221,7 +232,12 @@ impl DaemonEngineGStreamer {
                 {
                     ring.video_first_pts = Some(pts);
                     ring.video_start_instant = Some(Instant::now());
-                    log::debug!("First Video PTS Recieved: {}ms", pts.mseconds());
+                    log::debug!(
+                        "First Video PTS Recieved: {}ms (raw {}ms, segment shift {}ms)",
+                        pts.mseconds(),
+                        raw_pts.mseconds(),
+                        segment_shift_ns / 1_000_000
+                    );
                 }
 
                 if ring.audio_first_pts.is_none()
@@ -229,10 +245,18 @@ impl DaemonEngineGStreamer {
                 {
                     ring.audio_first_pts = Some(pts);
                     ring.audio_start_instant = Some(Instant::now());
-                    log::debug!("First Audio PTS Recieved: {}ms", pts.mseconds());
+                    log::debug!(
+                        "First Audio PTS Recieved: {}ms (raw {}ms, segment shift {}ms)",
+                        pts.mseconds(),
+                        raw_pts.mseconds(),
+                        segment_shift_ns / 1_000_000
+                    );
                 }
 
-                let dts = buffer_ref.dts();
+                let total_shift_ns = pts.nseconds() as i64 - raw_pts.nseconds() as i64;
+                let dts = buffer_ref.dts().map(|d| {
+                    ClockTime::from_nseconds((d.nseconds() as i64 + total_shift_ns).max(0) as u64)
+                });
                 let duration = buffer_ref.duration();
                 let is_keyframe = match content_type {
                     ContentType::Video => !buffer_ref
@@ -245,19 +269,24 @@ impl DaemonEngineGStreamer {
                     EncodedFrame::new(buffer_ref.to_owned(), pts, dts, duration, is_keyframe);
 
                 if let Some(caps) = caps {
-                    match content_type {
-                        ContentType::Video => {
-                            if ring.video_caps.is_none() {
-                                log::debug!("Stored downstream video caps: {:?}", caps);
-                                ring.video_caps = Some(caps);
-                            }
+                    if let ContentType::Video = content_type {
+                        let dims = |c: &gstreamer::Caps| {
+                            c.structure(0)
+                                .map(|s| (s.get::<i32>("width").ok(), s.get::<i32>("height").ok()))
+                        };
+                        let changed = ring
+                            .video_caps
+                            .as_ref()
+                            .is_some_and(|old| dims(old) != dims(&caps));
+                        if changed {
+                            log::warn!("video caps changed, flushing ring");
+                            ring.flush_frames();
                         }
-                        ContentType::Audio => {
-                            if ring.audio_caps.is_none() {
-                                log::debug!("Stored downstream audio caps: {}", caps);
-                                ring.audio_caps = Some(caps)
-                            }
+                        if changed || ring.video_caps.is_none() {
+                            ring.video_caps = Some(caps);
                         }
+                    } else if ring.audio_caps.is_none() {
+                        ring.audio_caps = Some(caps);
                     }
                 }
 

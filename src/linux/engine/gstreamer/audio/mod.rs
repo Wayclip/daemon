@@ -11,22 +11,6 @@ pub mod device;
 
 pub const DEFAULT_AUDIO_CHANNELS: i32 = 2;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DefaultDeviceType {
-    Microphone,
-    Background,
-}
-
-impl DefaultDeviceType {
-    pub fn is_sink(&self) -> bool {
-        if self == &Self::Background {
-            true
-        } else {
-            false
-        }
-    }
-}
-
 pub struct AudioBranchBuilder<'a> {
     user_settings: &'a UserSettings,
 }
