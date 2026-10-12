@@ -43,9 +43,6 @@ pub struct SaveData {
     pub audio_frames: Vec<EncodedFrame>,
     pub video_caps: gstreamer::Caps,
     pub audio_caps: Option<gstreamer::Caps>,
-    // basically if video & audio frames are misaligned. this is offset of audio relative to video
-    // (their first frames)
-    pub sync_offset_ms: i64,
     pub duration: ClockTime,
 }
 

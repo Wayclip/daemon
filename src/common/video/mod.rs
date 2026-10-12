@@ -136,8 +136,13 @@ impl SaveManager {
 
         // Extract the base pts & offset - we will use these as anchor points to make sure video,
         // audio and the real timestamps are synced properly
-        let (video_base_pts, audio_base_pts) = save_data.get_base_pts();
-        let sync_offset_ms = save_data.sync_offset_ms;
+        // P.S. We now share exact same base for both video & audio..
+        let (video_first_pts, audio_first_pts) = save_data.get_base_pts();
+        let base_pts = if save_data.audio_frames.is_empty() {
+            video_first_pts
+        } else {
+            video_first_pts.min(audio_first_pts)
+        };
 
         // -- Structures & Streams --
         // For every content type, there is a data structure. We have to extract this data structure
@@ -224,7 +229,7 @@ impl SaveManager {
             video_appsrc,
             EncodedFrameInfo {
                 frames: video_frames,
-                base_pts: video_base_pts,
+                base_pts,
                 offset_ms: 0,
                 content_type: ContentType::Video,
             },
@@ -260,8 +265,8 @@ impl SaveManager {
                 audio_appsrc,
                 EncodedFrameInfo {
                     frames: audio_frames,
-                    base_pts: audio_base_pts,
-                    offset_ms: sync_offset_ms,
+                    base_pts,
+                    offset_ms: 0,
                     content_type: ContentType::Audio,
                 },
             ));

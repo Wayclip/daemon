@@ -303,6 +303,7 @@ impl DaemonCore {
                     log::error!("shutdown error: {e}");
                 }
                 let _ = responder.send(res);
+                tokio::time::sleep(Duration::from_millis(150)).await;
                 exit(0);
             }
             IpcCommand::SaveClip {
@@ -313,16 +314,27 @@ impl DaemonCore {
                     let _ = responder.send(Err(WayclipError::Validation("Already saving".into())));
                     return Ok(());
                 }
-
                 self.update_status(DaemonStatus::Saving)?;
                 let session = self.current_session.clone();
                 let ring = self.engine.ring();
                 let sender = self.save_channel.0.clone();
                 tokio::spawn(async move {
-                    let result = SavePipelineFactory::save(&session, custom_name, ring).await;
-                    let _ = sender.send(SaveDone { result, responder });
+                    let result = match tokio::spawn(async move {
+                        SavePipelineFactory::save(&session, custom_name, ring).await
+                    })
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(e) => Err(WayclipError::Validation(
+                            format!("save task failed: {e}").into(),
+                        )),
+                    };
+                    if let Err(mpsc::error::SendError(done)) =
+                        sender.send(SaveDone { result, responder }).await
+                    {
+                        let _ = done.responder.send(done.result);
+                    }
                 });
-                self.update_status(DaemonStatus::Active)?;
             }
         }
 

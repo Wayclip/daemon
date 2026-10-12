@@ -1,7 +1,7 @@
-use chrono::Local;
 use gstreamer::ClockTime;
 use parking_lot::Mutex;
-use std::sync::Arc;
+use std::fmt::Write;
+use std::{path::Path, sync::Arc};
 use tokio::sync::oneshot;
 use wayclip_core::{
     app::clips::query::ClipsQuery,
@@ -83,44 +83,38 @@ impl SavePipelineFactory {
 
         let duration = saved_data.duration;
 
-        // TODO: CUSTOM FORMATTING LIKE W DISCORD STATUS
-        let mut parsed_name = Local::now()
-            .format(&user_settings.output.name_format)
+        let ext = user_settings
+            .output
+            .video_format
+            .get_extension()
             .to_string();
         let game_str = current_session
             .game
             .as_ref()
             .map(|g| g.slug.clone())
-            .unwrap_or(String::from("desktop"));
-        parsed_name = parsed_name.replace("{game}", &game_str);
+            .unwrap_or_else(|| "desktop".to_string());
 
-        log::debug!("Formatted clip name: {}", parsed_name);
-
-        let clip_name = match forced_name {
-            None => format!(
-                "{}.{}",
-                parsed_name,
-                user_settings.output.video_format.get_extension()
+        let base = match forced_name {
+            Some(n) => Self::safe_stem(&n, &ext),
+            None => Self::safe_stem(
+                &Self::format_name(&user_settings.output.name_format).replace("{game}", &game_str),
+                &ext,
             ),
-            Some(n) => n,
         };
+        let clip_dir = &user_settings.output.clip_directory.0;
+        let stem = Self::unique_stem(clip_dir, &base, &ext);
 
-        let clip_output_path = user_settings.output.clip_directory.0.join(&clip_name);
-
-        let preview_name = format!("{}.preview.mkv", parsed_name);
-        let preview_output_path = user_settings.output.preview_directory.0.join(preview_name);
-
-        let metadata_name = format!("{}.json", parsed_name);
+        let clip_output_path = clip_dir.join(format!("{stem}.{ext}"));
+        let preview_output_path = user_settings
+            .output
+            .preview_directory
+            .0
+            .join(format!("{stem}.preview.mkv"));
         let metadata_output_path = user_settings
             .output
             .metadata_directory
             .0
-            .join(metadata_name);
-
-        log::debug!(
-            "Spawning tokio task to write video to {}",
-            clip_output_path.to_string_lossy()
-        );
+            .join(format!("{stem}.json"));
 
         let clip_path_for_remux = clip_output_path.clone();
         let preview_path_for_remux = preview_output_path.clone();
@@ -150,7 +144,7 @@ impl SavePipelineFactory {
                 .map_err(|e| WayclipError::Validation(e.to_string().into()))??;
 
             LocalClip::new(
-                &parsed_name,
+                &stem,
                 user_settings.output.video_format.clone(),
                 clip_output_path,
                 preview_output_path,
@@ -167,6 +161,54 @@ impl SavePipelineFactory {
         }
         .await?;
 
-        Ok(parsed_name)
+        Ok(stem)
+    }
+
+    fn safe_stem(raw: &str, ext: &str) -> String {
+        let name = Path::new(raw.trim())
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let name = name.strip_suffix(&format!(".{ext}")).unwrap_or(name);
+        let cleaned: String = name
+            .chars()
+            .map(|c| {
+                // char::from(92) is `\`
+                if c.is_control()
+                    || c == char::from(92)
+                    || matches!(c, '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+                {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let cleaned: String = cleaned.trim().trim_matches('.').chars().take(120).collect();
+        if cleaned.is_empty() {
+            "clip".into()
+        } else {
+            cleaned
+        }
+    }
+
+    fn unique_stem(dir: &Path, stem: &str, ext: &str) -> String {
+        let (mut candidate, mut n) = (stem.to_string(), 1);
+        while dir.join(format!("{candidate}.{ext}")).exists() {
+            candidate = format!("{stem}-{n}");
+            n += 1;
+        }
+        candidate
+    }
+
+    // TODO: Add more cool options to format like w discord
+    fn format_name(fmt: &str) -> String {
+        let now = chrono::Local::now();
+        let mut out = String::new();
+        if write!(out, "{}", now.format(fmt)).is_err() {
+            log::warn!("invalid output.name_format {:?}, using default", fmt);
+            out = now.format("%Y-%m-%d_%H-%M-%S").to_string();
+        }
+        out
     }
 }
