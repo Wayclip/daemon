@@ -37,6 +37,25 @@ impl EncodedFrame {
     }
 }
 
+impl EncodedFrame {
+    /// Trick to reduce size
+    pub fn compact(buf: &gstreamer::BufferRef) -> gstreamer::Buffer {
+        let Ok(map) = buf.map_readable() else {
+            return buf.to_owned();
+        };
+        let mut out = gstreamer::Buffer::from_slice(map.as_slice().to_vec());
+        if let Some(o) = out.get_mut() {
+            o.set_pts(buf.pts());
+            o.set_dts(buf.dts());
+            o.set_duration(buf.duration());
+            o.set_offset(buf.offset());
+            o.set_offset_end(buf.offset_end());
+            o.set_flags(buf.flags());
+        }
+        out
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SaveData {
     pub video_frames: Vec<EncodedFrame>,

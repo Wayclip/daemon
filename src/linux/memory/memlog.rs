@@ -64,7 +64,11 @@ impl Residency {
             text.lines()
                 .find_map(|line| {
                     let rest = line.strip_prefix(key)?.strip_prefix(':')?;
-                    rest.split_whitespace().next()?.parse().ok()
+                    rest.split_whitespace()
+                        .next()?
+                        .parse::<u64>()
+                        .ok()
+                        .map(|kb| kb * 1000)
                 })
                 .unwrap_or(0)
         };
@@ -95,31 +99,33 @@ pub struct Sample {
     pub video_frames: usize,
     pub audio_frames: usize,
     pub ring_bytes: usize,
+    pub ring_pinned: usize,
 }
 
 impl Display for Sample {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let m = |b: u64| b as f64 / 1_000_000.0;
+        let (r, a) = (&self.residency, &self.malloc);
         write!(
             f,
-            "t={:>6}s rss={:>7}M anon={:>7}M dirty={:>7}M anon_beyond_malloc={:>7}M \
-             arena={:>7}M inuse={:>7}M free_in_arena={:>7}M frag={:>5.1}% mmap={:>6}M \
-             rss_anon={:>7}M rss_file={:>6}M rss_shmem={:>5}M thp={:>5}M \
-             ring={:>6}M v={} a={}",
+            "t={:>6}s rss={:.0}M rss_anon={:.0}M rss_file={:.0}M rss_shmem={:.0}M dirty={:.0}M \
+             beyond_malloc={:.0}M arena={:.0}M inuse={:.0}M free_in_arena={:.0}M frag={:.1}% \
+             mmap={:.0}M thp={:.0}M ring={:.1}M ring_pinned={:.1}M v={} a={}",
             self.elapsed_secs,
-            (self.residency.rss) / 1000,
-            (self.residency.anonymous) / 1000,
-            (self.residency.private_dirty) / 1000,
-            (self.residency.anonymous_beyond_malloc(&self.malloc) / 1000),
-            (self.malloc.arena) / 1000,
-            (self.malloc.uordblks) / 1000,
-            (self.malloc.fordblks) / 1000,
-            self.malloc.fragmentation() * 100.0,
-            (self.malloc.hblkhd) / 1000,
-            (self.residency.rss_anon) / 1000,
-            (self.residency.rss_file) / 1000,
-            (self.residency.rss_shmem) / 1000,
-            (self.residency.anom_huge_pages) / 1000,
-            (self.ring_bytes as u64) / 1000,
+            m(r.rss),
+            m(r.rss_anon),
+            m(r.rss_file),
+            m(r.rss_shmem),
+            m(r.private_dirty),
+            m(r.anonymous_beyond_malloc(a)),
+            m(a.arena),
+            m(a.uordblks),
+            m(a.fordblks),
+            a.fragmentation() * 100.0,
+            m(a.hblkhd),
+            m(r.anom_huge_pages),
+            m(self.ring_bytes as u64),
+            m(self.ring_pinned as u64),
             self.video_frames,
             self.audio_frames,
         )
@@ -136,6 +142,16 @@ impl Sample {
             video_frames: ring.video_frames.len(),
             audio_frames: ring.audio_frames.len(),
             ring_bytes: ring.total_buffer_bytes,
+            ring_pinned: ring
+                .video_frames
+                .iter()
+                .chain(ring.audio_frames.iter())
+                .map(|f| {
+                    (0..f.payload.n_memory())
+                        .map(|i| f.payload.peek_memory(i).maxsize())
+                        .sum::<usize>()
+                })
+                .sum(),
         }
     }
 }

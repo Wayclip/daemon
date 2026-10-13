@@ -21,7 +21,7 @@ use crate::{
     },
 };
 
-pub const STALL_LIMIT: Duration = Duration::from_secs(10);
+const PORTAL_ATTEMPTS: u32 = 5;
 
 const DMABUF_RETRY_BACKOFF: [Duration; 4] = [
     Duration::from_secs(120),
@@ -89,7 +89,21 @@ impl DaemonEngine {
         user_settings: &UserSettings,
         sender: mpsc::Sender<CoreEvent>,
     ) -> Result<(), WayclipError> {
-        self.pipewire_pipeline.setup_screncast().await?;
+        let mut delay = Duration::from_secs(1);
+        for attempt in 1..=PORTAL_ATTEMPTS {
+            match self.pipewire_pipeline.setup_screncast().await {
+                Ok(_) => break,
+                Err(e) if attempt < PORTAL_ATTEMPTS => {
+                    log::warn!(
+                        "portal not ready {attempt}/{PORTAL_ATTEMPTS}: {e}. retrying in {}s",
+                        delay.as_secs()
+                    );
+                    tokio::time::sleep(delay).await;
+                    delay *= 2;
+                }
+                Err(e) => return Err(e),
+            }
+        }
 
         self.gstreamer_pipeline.setup_gstreamer(
             user_settings,
@@ -245,12 +259,6 @@ impl DaemonEngine {
         self.setup(user_settings, sender).await
     }
 
-    /// Restarts the *existing* pipeline instead of rebuilding it.
-    ///
-    /// A full `recover` allocates a fresh GL display, GL context and NVENC session, which is the
-    /// most expensive thing the daemon can do and the most likely to fail again when the failure
-    /// was caused by video memory being exhausted. Cycling the same pipeline through NULL and back
-    /// to PLAYING keeps every allocation, so a transient failure costs nothing but time.
     pub async fn retry(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {
         self.started_at = None;
         self.stop_watcher();
