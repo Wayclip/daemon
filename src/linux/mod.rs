@@ -25,39 +25,23 @@ use crate::{
     common::gst::bus::CoreEvent,
     linux::{
         engine::{
-            DaemonEngine, STALL_LIMIT,
-            gstreamer::{
-                CaptureMode,
-                save::{SaveDone, SavePipelineFactory},
-            },
+            DaemonEngine,
+            gstreamer::save::{SaveDone, SavePipelineFactory},
         },
         ipc::{DaemonIpc, commands::IpcCommand},
         memory::MemoryManager,
+        recovery::{Problem, Recovery},
         services::DaemonServices,
         session::CurrentSession,
     },
 };
 
-const RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
-const RECOVERY_BACKOFF: [Duration; 6] = [
-    Duration::from_secs(0),
-    Duration::from_secs(2),
-    Duration::from_secs(5),
-    Duration::from_secs(10),
-    Duration::from_secs(20),
-    Duration::from_secs(30),
-];
-const HEALTHY_RESET: Duration = Duration::from_secs(30);
-const REASONS: [&str; 4] = [
-    "out_of_memory",
-    "out of memory",
-    "failed to upload buffer",
-    "not_supported_device",
-];
+const STALL_LIMIT: Duration = Duration::from_secs(10);
 
 pub mod engine;
 pub mod ipc;
 pub mod memory;
+pub mod recovery;
 pub mod services;
 pub mod session;
 
@@ -83,12 +67,8 @@ pub struct DaemonCore {
     /// We also setup another channel to communicate with Saves so that they can run in BG and they
     /// dont block main pipeline
     save_channel: (mpsc::Sender<SaveDone>, mpsc::Receiver<SaveDone>),
-    /// How many recoveries in a row were needed. Picks the backoff delay and how drastic the next
-    /// recovery is. Reset once video has been flowing for HEALTHY_RESET.
-    recovery_attempt: usize,
-    /// A recovery that has been asked for and runs once its delay has passed
-    recovery_due: Option<(Instant, String)>,
-    healthy_since: Option<Instant>,
+    /// Recovery state machine, see recovery.rs
+    recovery: Recovery,
 }
 
 impl DaemonCore {
@@ -112,9 +92,7 @@ impl DaemonCore {
             cancel_token,
             event_channel,
             save_channel,
-            recovery_attempt: 0,
-            recovery_due: None,
-            healthy_since: None,
+            recovery: Recovery::default(),
         })
     }
 
@@ -230,11 +208,7 @@ impl DaemonCore {
 
                 Some(event) = self.event_channel.1.recv() => {
                     log::error!("pipeline event: {:?}", event);
-                    let reason = match event {
-                        CoreEvent::PipelineError(m) => m,
-                        CoreEvent::PipelineEos => "unexpected EOS".to_string(),
-                    };
-                    self.schedule_recovery(&reason);
+                    self.recovery.schedule(Problem::from_event(event));
                 }
 
                 Some(SaveDone { result, responder }) = self.save_channel.1.recv() => {
@@ -268,13 +242,13 @@ impl DaemonCore {
                     }
                     if self.status == DaemonStatus::Active {
                         self.track_health();
-                        if self.recovery_due.is_some() {
+                        if self.recovery.pending() {
                             self.run_due_recovery().await;
                         } else if self.engine.capture_degraded() {
-                            self.schedule_recovery("guard dropped every frame");
+                            self.recovery.schedule(Problem::Degraded);
                         } else if self.engine.is_stalled(STALL_LIMIT) {
                             log::warn!("no video frames for {}s", STALL_LIMIT.as_secs());
-                            self.schedule_recovery("video stalled");
+                            self.recovery.schedule(Problem::Stalled);
                         } else if self.engine.dmabuf_retry_due() {
                             self.retry_dmabuf().await;
                         }
@@ -358,112 +332,5 @@ impl DaemonCore {
         }
 
         Ok(())
-    }
-
-    // ---  Recovery ---
-    // TODO: MOVE TO SOME DIFF MODULE?
-
-    /// Track how long video has been flowing
-    fn track_health(&mut self) {
-        if self.engine.video_flowing() {
-            let since = *self.healthy_since.get_or_insert_with(Instant::now);
-            if self.recovery_attempt > 0 && since.elapsed() >= HEALTHY_RESET {
-                log::info!("video healthy again, resetting recovery ladder");
-                self.recovery_attempt = 0;
-            }
-        } else {
-            self.healthy_since = None;
-        }
-    }
-
-    /// Ask for a recovery. This will never block or fail..
-    fn schedule_recovery(&mut self, reason: &str) {
-        if self.recovery_due.is_some() {
-            return;
-        }
-        let delay = RECOVERY_BACKOFF[self.recovery_attempt.min(RECOVERY_BACKOFF.len() - 1)];
-        log::warn!(
-            "pipeline problem ({reason}); recovery #{} in {}s",
-            self.recovery_attempt + 1,
-            delay.as_secs()
-        );
-        self.recovery_due = Some((Instant::now() + delay, reason.to_string()));
-    }
-
-    fn is_video_memory_failure(reason: &str) -> bool {
-        let reason = reason.to_ascii_lowercase();
-        REASONS.iter().any(|needle| reason.contains(needle))
-    }
-
-    async fn run_due_recovery(&mut self) {
-        let Some((_, reason)) = self.recovery_due.take_if(|(due, _)| Instant::now() >= *due) else {
-            return;
-        };
-
-        let attempt = self.recovery_attempt;
-        self.recovery_attempt += 1;
-
-        let settings = self.current_session.user_settings.clone();
-        let sender = self.event_channel.0.clone();
-        let stalled = reason == "video stalled";
-        let result = if !self.engine.has_portal() || attempt >= 2 || (stalled && attempt >= 1) {
-            log::warn!("recovery #{}: full rebuild ({reason})", attempt + 1);
-            if !stalled || attempt >= 2 {
-                self.engine.capture_mode = CaptureMode::SystemMemory;
-            }
-            tokio::time::timeout(RECOVERY_TIMEOUT, self.engine.recover(&settings, sender)).await
-        } else if attempt == 1 {
-            log::warn!("recovery #2: rebuilding on system memory ({reason})");
-            tokio::time::timeout(
-                RECOVERY_TIMEOUT,
-                self.engine
-                    .downgrade_to_system_memory(&settings, sender, &reason),
-            )
-            .await
-        } else if Self::is_video_memory_failure(&reason) {
-            log::warn!("recovery #1: in-place restart ({reason})");
-            tokio::time::timeout(RECOVERY_TIMEOUT, self.engine.retry(sender)).await
-        } else {
-            log::warn!("recovery #1: rebuilding pipeline ({reason})");
-            tokio::time::timeout(
-                RECOVERY_TIMEOUT,
-                self.engine.restart_pipeline(&settings, sender),
-            )
-            .await
-        };
-
-        match result {
-            Ok(Ok(())) => {
-                while self.event_channel.1.try_recv().is_ok() {}
-                self.healthy_since = None;
-                log::info!("recovery #{} done", attempt + 1);
-            }
-            other => {
-                log::error!(
-                    "recovery #{} failed ({other:?}), will try again",
-                    attempt + 1
-                );
-                self.schedule_recovery("previous recovery failed");
-            }
-        }
-    }
-
-    async fn retry_dmabuf(&mut self) {
-        let settings = self.current_session.user_settings.clone();
-        let sender = self.event_channel.0.clone();
-        let res = tokio::time::timeout(
-            RECOVERY_TIMEOUT,
-            self.engine.retry_dmabuf(&settings, sender),
-        )
-        .await;
-
-        match res {
-            Ok(Ok(())) => while self.event_channel.1.try_recv().is_ok() {},
-            other => {
-                log::warn!("DMABuf retry failed to start ({other:?}). staying on system memory");
-                self.engine.capture_mode = CaptureMode::SystemMemory;
-                self.schedule_recovery("dmabuf retry failed");
-            }
-        }
     }
 }

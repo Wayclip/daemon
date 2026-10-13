@@ -15,7 +15,7 @@ use wayclip_core::{
 pub mod memlog;
 pub mod nvidia;
 
-pub const MEMORY_LOG_INTERVAL: Duration = Duration::from_secs(60);
+const M_LOG_INTERVAL: Duration = Duration::from_secs(60);
 const M_TRIM_THRESHOLD: i32 = -1;
 const M_MMAP_THRESHOLD: i32 = -3;
 const M_ARENA_MAX: i32 = -8;
@@ -57,7 +57,7 @@ impl MemoryManager {
             return;
         }
 
-        let mut ticker = tokio::time::interval(MEMORY_LOG_INTERVAL);
+        let mut ticker = tokio::time::interval(M_LOG_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {

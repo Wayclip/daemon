@@ -4,13 +4,13 @@ use wayclip_core::models::error::WayclipError;
 
 use crate::common::video::ring::data::{ContentType, EncodedFrame};
 
-pub const DEFAULT_APPSRC_FORMAT: gstreamer::Format = gstreamer::Format::Time;
-pub const DEFAULT_APPSRC_IS_LIVE: bool = false;
+const DEFAULT_APPSRC_FORMAT: gstreamer::Format = gstreamer::Format::Time;
+const DEFAULT_APPSRC_IS_LIVE: bool = false;
 pub const DEFAULT_APPSRC_DO_TIMESTAMP: bool = false;
 
-pub const DEFAULT_APPSINK_MAX_BUFFERS: u32 = 100;
-pub const DEFAULT_APPSINK_DROP: bool = false;
-pub const DEFAULT_APPSINK_SYNC: bool = false;
+const DEFAULT_APPSINK_MAX_BUFFERS: u32 = 100;
+const DEFAULT_APPSINK_DROP: bool = false;
+const DEFAULT_APPSINK_SYNC: bool = false;
 
 pub struct GStreamerApp;
 

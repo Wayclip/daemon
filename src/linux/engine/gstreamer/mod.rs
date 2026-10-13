@@ -266,7 +266,7 @@ impl DaemonEngineGStreamer {
                 };
 
                 let frame =
-                    EncodedFrame::new(buffer_ref.to_owned(), pts, dts, duration, is_keyframe);
+                    EncodedFrame::new(EncodedFrame::compact(buffer_ref), pts, dts, duration, is_keyframe);
 
                 if let Some(caps) = caps {
                     if let ContentType::Video = content_type {
