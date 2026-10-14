@@ -18,6 +18,7 @@ use crate::common::video::ring::{
 use crate::linux::engine::gstreamer::audio::AudioBranchBuilder;
 use crate::linux::engine::gstreamer::audio::device::AudioDeviceFactory;
 use crate::linux::engine::gstreamer::video::VideoBranchBuilder;
+use crate::linux::engine::gstreamer::video::nvidia::VideoNvidia;
 use crate::linux::engine::pipewire::DaemonEngineConnectionData;
 use wayclip_core::settings::recording::CodecType;
 
@@ -73,7 +74,8 @@ impl DaemonEngineGStreamer {
         if matches!(
             user_settings.recording.video.codec.get_backend(),
             CodecType::NVIDIA
-        ) {
+        ) && !VideoNvidia::nvidia_cuda_enabled(&user_settings.recording.video.codec)
+        {
             let gl_display =
                 gstreamer_gl_egl::GLDisplayEGL::new()?.upcast::<gstreamer_gl::GLDisplay>();
             self.pipeline.bind_gl_display(&gl_display)?;
@@ -265,8 +267,13 @@ impl DaemonEngineGStreamer {
                     ContentType::Audio => true,
                 };
 
-                let frame =
-                    EncodedFrame::new(EncodedFrame::compact(buffer_ref), pts, dts, duration, is_keyframe);
+                let frame = EncodedFrame::new(
+                    EncodedFrame::compact(buffer_ref),
+                    pts,
+                    dts,
+                    duration,
+                    is_keyframe,
+                );
 
                 if let Some(caps) = caps {
                     if let ContentType::Video = content_type {

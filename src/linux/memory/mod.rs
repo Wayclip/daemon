@@ -18,12 +18,27 @@ pub mod nvidia;
 const M_LOG_INTERVAL: Duration = Duration::from_secs(60);
 const PR_SET_THP_DISABLE: i32 = 41;
 
+unsafe extern "C" {
+    fn mi_check_owned(p: *const std::ffi::c_void) -> bool;
+}
+
+pub fn allocator_is_mimalloc() -> bool {
+    let probe: Vec<u8> = Vec::with_capacity(64);
+    unsafe { mi_check_owned(probe.as_ptr() as *const std::ffi::c_void) }
+}
+
 pub struct MemoryManager;
 
 impl MemoryManager {
     pub fn tune_allocator() {
         unsafe {
             libc::prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
+        }
+
+        if !allocator_is_mimalloc() {
+            log::error!(
+                "mimalloc is linked but is NOT the global allocator. MemoryManager::trim is a no-op and trimmed memory will never be returned to the OS"
+            );
         }
     }
 
