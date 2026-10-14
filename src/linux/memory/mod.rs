@@ -1,6 +1,10 @@
 use crate::{
+    common::gst::guard::CaptureHealth,
     common::video::ring::RingBuffer,
-    linux::memory::{memlog::Sample, nvidia::Nvidia},
+    linux::memory::{
+        memlog::{Counters, Sample},
+        nvidia::Nvidia,
+    },
 };
 use parking_lot::Mutex;
 use std::{
@@ -12,6 +16,7 @@ use wayclip_core::{
     settings::{UserSettings, recording::CodecType},
 };
 
+pub mod allocator_env;
 pub mod memlog;
 pub mod nvidia;
 
@@ -34,7 +39,7 @@ impl MemoryManager {
         unsafe {
             libc::prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
         }
-
+        allocator_env::AllocatorEnv::ensure();
         if !allocator_is_mimalloc() {
             log::error!(
                 "mimalloc is linked but is NOT the global allocator. MemoryManager::trim is a no-op and trimmed memory will never be returned to the OS"
@@ -61,17 +66,46 @@ impl MemoryManager {
         log::log_enabled!(log::Level::Debug)
     }
 
-    pub async fn run_memlog(started: Instant, ring: Arc<Mutex<RingBuffer>>) {
+    pub async fn run_memlog(
+        started: Instant,
+        ring: Arc<Mutex<RingBuffer>>,
+        health: Arc<CaptureHealth>,
+        target_fps: f64,
+    ) {
         if !Self::memlog_enabled() {
             return;
         }
 
         let mut ticker = tokio::time::interval(M_LOG_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut prev = Counters::default();
+        let mut low_streak: u32 = 0;
 
         loop {
             ticker.tick().await;
-            log::debug!("{}", Sample::capture(started, &ring));
+            let sample = Sample::capture(
+                started,
+                &ring,
+                &mut prev,
+                target_fps,
+                health.total_dropped(),
+            );
+            log::debug!("{}", sample);
+
+            if sample.video_flowing {
+                low_streak = 0;
+            } else {
+                low_streak += 1;
+                if low_streak == 2 {
+                    log::warn!(
+                        "capture chain has been under target for 2 intervals: {:.2} fps, target {:.0}, ring holds {} frames, {} buffers dropped total",
+                        sample.video_fps,
+                        target_fps,
+                        sample.video_frames,
+                        sample.dropped,
+                    );
+                }
+            }
         }
     }
 
