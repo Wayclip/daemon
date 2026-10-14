@@ -142,6 +142,10 @@ impl DaemonEngine {
             .is_ok()
     }
 
+    pub fn health(&self) -> Arc<CaptureHealth> {
+        Arc::clone(&self.health)
+    }
+
     pub fn video_flowing(&self) -> bool {
         self.ring_buffer
             .lock()

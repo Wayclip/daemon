@@ -101,6 +101,18 @@ pub struct Sample {
     pub video_frames: usize,
     pub audio_frames: usize,
     pub ring_bytes: usize,
+    /// Frames per second actually delivered to the ring over the last sample interval
+    pub video_fps: f64,
+    pub audio_fps: f64,
+    pub dropped: u64,
+    pub video_flowing: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Counters {
+    video: u64,
+    audio: u64,
+    at: Option<Instant>,
 }
 
 impl Display for Sample {
@@ -110,7 +122,8 @@ impl Display for Sample {
         write!(
             f,
             "t={:>6}s rss={:.0}M rss_anon={:.0}M rss_file={:.0}M rss_shmem={:.0}M dirty={:.0}M \
-             mimalloc={:.0}M other_anon={:.0}M thp={:.0}M ring={:.1}M v={} a={}",
+             mimalloc={:.0}M other_anon={:.0}M thp={:.0}M ring={:.1}M v={} a={} \
+             vfps={:.2} afps={:.2} flow={} drop={}",
             self.elapsed_secs,
             m(r.rss),
             m(r.rss_anon),
@@ -123,20 +136,61 @@ impl Display for Sample {
             m(self.ring_bytes as u64),
             self.video_frames,
             self.audio_frames,
+            self.video_fps,
+            self.audio_fps,
+            if self.video_flowing { "yes" } else { "NO" },
+            self.dropped,
         )
     }
 }
 
 impl Sample {
-    pub fn capture(started: Instant, ring: &Arc<Mutex<RingBuffer>>) -> Self {
-        let ring = ring.lock();
+    pub fn capture(
+        started: Instant,
+        ring: &Arc<Mutex<RingBuffer>>,
+        prev: &mut Counters,
+        target_fps: f64,
+        dropped: u64,
+    ) -> Self {
+        let (ring_len, audio_len, video_total, audio_total, ring_bytes) = {
+            let ring = ring.lock();
+            (
+                ring.video_frames.len(),
+                ring.audio_frames.len(),
+                ring.video_frames_received,
+                ring.audio_frames_received,
+                ring.total_buffer_bytes,
+            )
+        };
+
+        let now = Instant::now();
+        let (video_fps, audio_fps) = match prev.at {
+            Some(last) => {
+                let secs = now.duration_since(last).as_secs_f64().max(0.001);
+                (
+                    video_total.saturating_sub(prev.video) as f64 / secs,
+                    audio_total.saturating_sub(prev.audio) as f64 / secs,
+                )
+            }
+            None => (0.0, 0.0),
+        };
+        *prev = Counters {
+            video: video_total,
+            audio: audio_total,
+            at: Some(now),
+        };
+
         Self {
             elapsed_secs: started.elapsed().as_secs(),
             residency: Residency::read(),
             heap: Heap::read(),
-            video_frames: ring.video_frames.len(),
-            audio_frames: ring.audio_frames.len(),
-            ring_bytes: ring.total_buffer_bytes,
+            video_frames: ring_len,
+            audio_frames: audio_len,
+            ring_bytes,
+            video_fps,
+            audio_fps,
+            dropped,
+            video_flowing: video_fps >= (target_fps - 2.0).max(1.0),
         }
     }
 }

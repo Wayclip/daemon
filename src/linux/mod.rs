@@ -122,7 +122,9 @@ impl DaemonCore {
 
         if MemoryManager::memlog_enabled() {
             let ring = self.engine.ring();
-            tokio::spawn(MemoryManager::run_memlog(Instant::now(), ring));
+            let health = self.engine.health();
+            let fps = self.current_session.user_settings.recording.video.fps.0 as f64;
+            tokio::spawn(MemoryManager::run_memlog(Instant::now(), ring, health, fps));
         }
 
         // After succesful start, we start our infinite event loop
