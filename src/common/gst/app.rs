@@ -1,4 +1,4 @@
-use gstreamer::{Caps, ClockTime};
+use gstreamer::{BufferCopyFlags, BufferFlags, Caps, ClockTime};
 use gstreamer_app::{AppSink, AppSrc};
 use wayclip_core::models::error::WayclipError;
 
@@ -47,34 +47,42 @@ impl GStreamerApp {
         frame_info: EncodedFrameInfo,
     ) -> std::thread::JoinHandle<Result<(), WayclipError>> {
         std::thread::spawn(move || {
-            for mut frame in frame_info.frames {
-                let buffer_ref = frame.payload.make_mut();
+            for frame in frame_info.frames {
+                // Copy instead using `MEMORY`
+                let mut payload = frame
+                    .payload
+                    .copy_region(BufferCopyFlags::MEMORY | BufferCopyFlags::FLAGS, ..)
+                    .map_err(|e| {
+                        WayclipError::Remux(format!("Failed to copy buffer: {e:?}").into())
+                    })?;
 
                 let pts = GStreamerApp::sync_timestamp(
                     frame.pts,
                     frame_info.base_pts,
                     frame_info.offset_ms,
                 );
-                buffer_ref.set_pts(pts);
 
-                if let Some(dts) = frame.dts {
-                    let dts = GStreamerApp::sync_timestamp(
-                        dts,
-                        frame_info.base_pts,
-                        frame_info.offset_ms,
-                    );
-                    buffer_ref.set_dts(dts);
+                let dts = frame.dts.map(|dts| {
+                    GStreamerApp::sync_timestamp(dts, frame_info.base_pts, frame_info.offset_ms)
+                });
+
+                if let Some(buffer_ref) = payload.get_mut() {
+                    buffer_ref.set_pts(pts);
+
+                    if let Some(dts) = dts {
+                        buffer_ref.set_dts(dts);
+                    }
+
+                    if let Some(duration) = frame.duration {
+                        buffer_ref.set_duration(duration);
+                    }
+
+                    if !frame.is_keyframe {
+                        buffer_ref.set_flags(BufferFlags::DELTA_UNIT);
+                    }
                 }
 
-                if let Some(duration) = frame.duration {
-                    buffer_ref.set_duration(duration);
-                }
-
-                if !frame.is_keyframe {
-                    buffer_ref.set_flags(gstreamer::BufferFlags::DELTA_UNIT);
-                }
-
-                appsrc.push_buffer(frame.payload).map_err(|e| {
+                appsrc.push_buffer(payload).map_err(|e| {
                     WayclipError::Remux(format!("Failed to push buffer: {:?}", e).into())
                 })?;
             }

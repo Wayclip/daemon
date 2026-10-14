@@ -5,13 +5,16 @@ use wayclip_core::{
     settings::{UserSettings, recording::CodecType},
 };
 
-use crate::common::gst::{
-    GStreamer,
-    caps::{GStreamerCapsType, VideoXRawFormat, VideoXRawMemory},
-    element::GStreamerElementType,
-    guard::{CaptureHealth, VideoBufferGuard},
-};
 use crate::linux::engine::gstreamer::CaptureMode;
+use crate::{
+    common::gst::{
+        GStreamer,
+        caps::{GStreamerCapsType, VideoXRawFormat, VideoXRawMemory},
+        element::GStreamerElementType,
+        guard::{CaptureHealth, VideoBufferGuard},
+    },
+    linux::engine::gstreamer::video::nvidia::VideoNvidia,
+};
 
 pub struct VideoPreprocessFactory;
 
@@ -47,9 +50,20 @@ impl VideoPreprocessFactory {
         mode: CaptureMode,
         health: Arc<CaptureHealth>,
     ) -> Result<(Vec<Element>, Element), WayclipError> {
-        match user_settings.recording.video.codec.get_backend() {
+        let codec = &user_settings.recording.video.codec;
+        match codec.get_backend() {
             CodecType::NVIDIA => {
-                Self::build_nvidia_pipeline(pipewire_src, video_queue, user_settings, mode, health)
+                if VideoNvidia::nvidia_cuda_enabled(codec) {
+                    Self::build_nvidia_cuda(pipewire_src, video_queue, user_settings, health)
+                } else {
+                    Self::build_nvidia_pipeline(
+                        pipewire_src,
+                        video_queue,
+                        user_settings,
+                        mode,
+                        health,
+                    )
+                }
             }
             CodecType::VAAPI => {
                 Self::build_vaapi_pipeline(pipewire_src, video_queue, user_settings, mode, health)
@@ -60,6 +74,71 @@ impl VideoPreprocessFactory {
         }
     }
 
+    /// `cudaupload` -> `cudaconvertscale` -> `nvh264enc`
+    fn build_nvidia_cuda(
+        pipewire_src: Element,
+        video_queue: Element,
+        user_settings: &UserSettings,
+        health: Arc<CaptureHealth>,
+    ) -> Result<(Vec<Element>, Element), WayclipError> {
+        let caps_1 = Self::source_caps(CaptureMode::SystemMemory);
+        let caps_filter_1 =
+            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_1 })?;
+
+        let cuda_upload = GStreamer::build_element(GStreamerElementType::CudaUpload)?;
+        VideoBufferGuard::attach(&cuda_upload, health);
+
+        let caps_2 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
+            width: None,
+            height: None,
+            framerate: None,
+            format: None,
+            memory: Some(VideoXRawMemory::CUDAMemory),
+        });
+        let caps_filter_2 =
+            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_2 })?;
+
+        let cuda_convert_scale = GStreamer::build_element(GStreamerElementType::CudaConvertScale)?;
+
+        let caps_3 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
+            width: Some(user_settings.recording.video.resolution.width as i32),
+            height: Some(user_settings.recording.video.resolution.height as i32),
+            framerate: None,
+            format: Some(VideoXRawFormat::NV12),
+            memory: Some(VideoXRawMemory::CUDAMemory),
+        });
+        let caps_filter_3 =
+            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_3 })?;
+
+        let videorate = GStreamer::build_element(GStreamerElementType::VideoRate)?;
+        let caps_4 = GStreamer::build_caps(GStreamerCapsType::VideoXRaw {
+            width: None,
+            height: None,
+            framerate: Some(gstreamer::Fraction::new(
+                user_settings.recording.video.fps.0 as i32,
+                1,
+            )),
+            format: Some(VideoXRawFormat::NV12),
+            memory: Some(VideoXRawMemory::CUDAMemory),
+        });
+        let caps_filter_4 =
+            GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_4 })?;
+
+        Ok((
+            vec![
+                pipewire_src,
+                caps_filter_1,
+                video_queue,
+                cuda_upload,
+                caps_filter_2,
+                cuda_convert_scale,
+                caps_filter_3,
+                videorate,
+            ],
+            caps_filter_4,
+        ))
+    }
+
     fn build_nvidia_pipeline(
         pipewire_src: Element,
         video_queue: Element,
@@ -67,8 +146,7 @@ impl VideoPreprocessFactory {
         mode: CaptureMode,
         health: Arc<CaptureHealth>,
     ) -> Result<(Vec<Element>, Element), WayclipError> {
-        // for nvidia we have (DMABuf | SystemMemory) -> glupload -> GLMemory -> format +
-        // colorconvert -> GLMemory NV12
+        // NVIDIA pipeline: (DMABuf | SystemMemory) -> videorate -> glupload (GLMemory) -> glcolorscale -> glcolorconvert -> GLMemory (NV12)
         let caps_1 = Self::source_caps(mode);
         let caps_filter_1 =
             GStreamer::build_element(GStreamerElementType::CapsFilter { caps: caps_1 })?;

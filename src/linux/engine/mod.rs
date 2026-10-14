@@ -16,7 +16,7 @@ use crate::{
         video::ring::RingBuffer,
     },
     linux::engine::{
-        gstreamer::{CaptureMode, DaemonEngineGStreamer},
+        gstreamer::{CaptureMode, DaemonEngineGStreamer, video::nvidia::VideoNvidia},
         pipewire::DaemonEnginePipewire,
     },
 };
@@ -58,6 +58,7 @@ impl DaemonEngine {
             ring_buffer: Arc::new(Mutex::new(RingBuffer::new(max_duration))),
             watcher: None,
             started_at: None,
+            // Decided in `setup`, once the codec is known.
             capture_mode: CaptureMode::DmaBuf,
             health: Arc::new(CaptureHealth::default()),
             dmabuf_strikes: 0,
@@ -104,6 +105,13 @@ impl DaemonEngine {
                 Err(e) => return Err(e),
             }
         }
+
+        self.capture_mode =
+            if VideoNvidia::nvidia_cuda_enabled(&user_settings.recording.video.codec) {
+                CaptureMode::SystemMemory
+            } else {
+                CaptureMode::DmaBuf
+            };
 
         self.gstreamer_pipeline.setup_gstreamer(
             user_settings,

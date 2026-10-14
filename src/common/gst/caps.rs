@@ -13,6 +13,8 @@ pub enum VideoXRawMemory {
     DMABuf,
     #[strum(serialize = "memory:GLMemory")]
     GLMemory,
+    #[strum(serialize = "memory:CUDAMemory")]
+    CUDAMemory,
     #[strum(serialize = "memory:VAMemory")]
     VAMemory,
 }

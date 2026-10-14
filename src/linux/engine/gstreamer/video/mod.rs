@@ -4,6 +4,7 @@ use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 
 use crate::common::gst::guard::CaptureHealth;
 use crate::linux::engine::gstreamer::video::encoder::VideoEncoderFactory;
+use crate::linux::engine::gstreamer::video::nvidia::VideoNvidia;
 use crate::linux::engine::gstreamer::video::parser::VideoParserFactory;
 use crate::linux::engine::gstreamer::video::preprocessor::VideoPreprocessFactory;
 use crate::linux::engine::gstreamer::{
@@ -16,6 +17,7 @@ use crate::{
 };
 
 pub mod encoder;
+pub mod nvidia;
 pub mod parser;
 pub mod preprocessor;
 
@@ -44,12 +46,19 @@ impl<'a> VideoBranchBuilder<'a> {
     pub fn build(self) -> Result<Vec<Element>, WayclipError> {
         let (file_descriptor, node_id) = self.connection_data.extract_data()?;
 
+        // `cudaupload` cannot take DMABuf, so the CUDA path always needs system memory.
+        let mode = if VideoNvidia::nvidia_cuda_enabled(&self.user_settings.recording.video.codec) {
+            CaptureMode::SystemMemory
+        } else {
+            self.mode
+        };
+
         let pipewire_src = GStreamer::build_element(GStreamerElementType::VideoPipewireSrc {
             do_timestamp: DEFAULT_APPSRC_DO_TIMESTAMP,
             fd: file_descriptor,
             path: node_id.into(),
             keepalive_ms: 1000 / self.user_settings.recording.video.fps.0.max(1) as i32,
-            always_copy: self.mode == CaptureMode::SystemMemory,
+            always_copy: mode == CaptureMode::SystemMemory,
         })?;
 
         let video_queue_1 = Self::build_queue()?;

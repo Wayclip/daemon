@@ -15,6 +15,8 @@ pub enum GStreamerElementType {
     GLUpload,
     GLColorScale,
     GLColorConvert,
+    CudaUpload,
+    CudaConvertScale,
     X264Enc,
     H264Parse,
     DecodeBin,
@@ -86,6 +88,8 @@ impl GStreamerElementType {
             Self::GLColorScale => GStreamerElement::new("glcolorscale", vec![]),
             Self::GLColorConvert => GStreamerElement::new("glcolorconvert", vec![]),
             Self::GLUpload => GStreamerElement::new("glupload", vec![]),
+            Self::CudaUpload => GStreamerElement::new("cudaupload", vec![]),
+            Self::CudaConvertScale => GStreamerElement::new("cudaconvertscale", vec![]),
             Self::VideoQueue {
                 buffers,
                 bytes,
