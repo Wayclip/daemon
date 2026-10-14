@@ -1,0 +1,299 @@
+use ::gstreamer::ClockTime;
+use parking_lot::Mutex;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::sync::mpsc;
+use wayclip_core::{models::error::WayclipError, settings::UserSettings};
+
+use crate::{
+    common::{
+        gst::{
+            bus::{BusWatcher, CoreEvent},
+            guard::CaptureHealth,
+        },
+        video::ring::RingBuffer,
+    },
+    linux::engine::{
+        gstreamer::{CaptureMode, DaemonEngineGStreamer},
+        pipewire::DaemonEnginePipewire,
+    },
+};
+
+const PORTAL_ATTEMPTS: u32 = 5;
+
+const DMABUF_RETRY_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(120),
+    Duration::from_secs(600),
+    Duration::from_secs(1800),
+    Duration::from_secs(3600),
+];
+const AUTO_RETRY_DMABUF: bool = false;
+
+pub mod gstreamer;
+pub mod pipewire;
+
+/// The DaemonEngine struct will be responsible for handing the main process of recording the
+/// screen, in addition to storing all the required fields and pipelines
+pub struct DaemonEngine {
+    pipewire_pipeline: DaemonEnginePipewire,
+    gstreamer_pipeline: DaemonEngineGStreamer,
+    ring_buffer: Arc<Mutex<RingBuffer>>,
+    pub watcher: Option<BusWatcher>,
+    started_at: Option<Instant>,
+    /// we can track the current mode of capture and change it as time goes on
+    pub capture_mode: CaptureMode,
+    health: Arc<CaptureHealth>,
+    dmabuf_strikes: usize,
+    dmabuf_retry_at: Option<Instant>,
+}
+
+impl DaemonEngine {
+    /// Create a new DaemonEngine with a maximum duration for the ring buffer
+    pub fn new(max_duration: ClockTime) -> Result<Self, WayclipError> {
+        Ok(Self {
+            gstreamer_pipeline: DaemonEngineGStreamer::new()?,
+            pipewire_pipeline: DaemonEnginePipewire::new()?,
+            ring_buffer: Arc::new(Mutex::new(RingBuffer::new(max_duration))),
+            watcher: None,
+            started_at: None,
+            capture_mode: CaptureMode::DmaBuf,
+            health: Arc::new(CaptureHealth::default()),
+            dmabuf_strikes: 0,
+            dmabuf_retry_at: None,
+        })
+    }
+
+    /// Method to safely stop the pipeline, managers and watcher.
+    pub async fn stop(&mut self) -> Result<(), WayclipError> {
+        self.stop_watcher();
+
+        let p = self.gstreamer_pipeline.pipeline.clone();
+        let gst = tokio::task::spawn_blocking(move || p.set_state(::gstreamer::State::Null))
+            .await
+            .map_err(|e| WayclipError::Validation(e.to_string().into()))?;
+        let pw = self.pipewire_pipeline.stop().await;
+
+        gst.map(|_| ()).map_err(WayclipError::from).and(pw)
+    }
+
+    /// Returns the clone of the ring
+    pub fn ring(&self) -> Arc<Mutex<RingBuffer>> {
+        Arc::clone(&self.ring_buffer)
+    }
+
+    /// Method to setup and start the engine, and start recording straight away
+    pub async fn setup(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<(), WayclipError> {
+        let mut delay = Duration::from_secs(1);
+        for attempt in 1..=PORTAL_ATTEMPTS {
+            match self.pipewire_pipeline.setup_screncast().await {
+                Ok(_) => break,
+                Err(e) if attempt < PORTAL_ATTEMPTS => {
+                    log::warn!(
+                        "portal not ready {attempt}/{PORTAL_ATTEMPTS}: {e}. retrying in {}s",
+                        delay.as_secs()
+                    );
+                    tokio::time::sleep(delay).await;
+                    delay *= 2;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        self.gstreamer_pipeline.setup_gstreamer(
+            user_settings,
+            &self.pipewire_pipeline.connection_data,
+            &self.pipewire_pipeline.manager,
+            Arc::clone(&self.ring_buffer),
+            self.capture_mode,
+            Arc::clone(&self.health),
+        )?;
+
+        self.gstreamer_pipeline.start().await?;
+
+        self.watch(sender)?;
+        self.started_at = Some(Instant::now());
+
+        Ok(())
+    }
+
+    /// The guard has been dropping every frame for a while: the DMABuf path is dead
+    pub fn capture_degraded(&self) -> bool {
+        self.capture_mode == CaptureMode::DmaBuf && self.health.is_degraded()
+    }
+
+    pub fn has_portal(&self) -> bool {
+        self.pipewire_pipeline
+            .connection_data
+            .extract_data()
+            .is_ok()
+    }
+
+    pub fn video_flowing(&self) -> bool {
+        self.ring_buffer
+            .lock()
+            .video_last_instant
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+    }
+
+    pub async fn restart_pipeline(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<(), WayclipError> {
+        log::info!("rebuilding pipeline ({:?})", self.capture_mode);
+        self.rebuild_gstreamer(user_settings, sender).await
+    }
+
+    pub fn dmabuf_retry_due(&self) -> bool {
+        self.capture_mode == CaptureMode::SystemMemory
+            && self.dmabuf_retry_at.is_some_and(|at| Instant::now() >= at)
+    }
+
+    pub async fn downgrade_to_system_memory(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+        reason: &str,
+    ) -> Result<(), WayclipError> {
+        log::warn!("DMABuf capture unreliable ({reason}), falling back to system memory");
+        self.capture_mode = CaptureMode::SystemMemory;
+        self.dmabuf_strikes = (self.dmabuf_strikes + 1).min(DMABUF_RETRY_BACKOFF.len());
+        self.dmabuf_retry_at = AUTO_RETRY_DMABUF
+            .then(|| Instant::now() + DMABUF_RETRY_BACKOFF[self.dmabuf_strikes - 1]);
+        self.rebuild_gstreamer(user_settings, sender).await
+    }
+
+    pub async fn retry_dmabuf(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<(), WayclipError> {
+        log::info!("retrying DMABuf capture");
+        self.capture_mode = CaptureMode::DmaBuf;
+        self.dmabuf_retry_at = None;
+        self.rebuild_gstreamer(user_settings, sender).await
+    }
+
+    async fn rebuild_gstreamer(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<(), WayclipError> {
+        self.started_at = None;
+        self.stop_watcher();
+
+        let old = self.gstreamer_pipeline.pipeline.clone();
+        match tokio::task::spawn_blocking(move || old.set_state(::gstreamer::State::Null)).await {
+            Ok(Err(e)) => log::warn!("old pipeline NULL failed: {e}"),
+            Err(e) => log::warn!("NULL task failed: {e}"),
+            Ok(Ok(())) => {}
+        }
+
+        {
+            let mut ring = self.ring_buffer.lock();
+            ring.begin_resync();
+            ring.video_last_instant = None;
+            ring.audio_last_instant = None;
+        }
+        self.health.reset();
+
+        self.gstreamer_pipeline = DaemonEngineGStreamer::new()?;
+        self.gstreamer_pipeline.setup_gstreamer(
+            user_settings,
+            &self.pipewire_pipeline.connection_data,
+            &self.pipewire_pipeline.manager,
+            Arc::clone(&self.ring_buffer),
+            self.capture_mode,
+            Arc::clone(&self.health),
+        )?;
+        self.gstreamer_pipeline.start().await?;
+
+        self.watch(sender)?;
+        self.started_at = Some(Instant::now());
+        Ok(())
+    }
+
+    pub fn is_stalled(&self, limit: Duration) -> bool {
+        let Some(started) = self.started_at else {
+            return false;
+        };
+
+        match self.ring_buffer.lock().video_last_instant {
+            Some(last) => last.elapsed() > limit,
+            None => started.elapsed() > limit,
+        }
+    }
+
+    pub async fn recover(
+        &mut self,
+        user_settings: &UserSettings,
+        sender: mpsc::Sender<CoreEvent>,
+    ) -> Result<(), WayclipError> {
+        self.started_at = None;
+
+        let old = self.gstreamer_pipeline.pipeline.clone();
+        match tokio::task::spawn_blocking(move || old.set_state(::gstreamer::State::Null)).await {
+            Ok(Err(e)) => log::warn!("old pipeline NULL failed: {e}"),
+            Err(e) => log::warn!("NULL task failed: {e}"),
+            Ok(Ok(())) => {}
+        }
+
+        if let Err(e) = self.pipewire_pipeline.stop().await {
+            log::warn!("closing old portal session error: {e}");
+        }
+
+        {
+            let mut ring = self.ring_buffer.lock();
+            ring.begin_resync();
+            ring.video_last_instant = None;
+            ring.audio_last_instant = None;
+        }
+
+        self.gstreamer_pipeline = DaemonEngineGStreamer::new()?;
+        self.setup(user_settings, sender).await
+    }
+
+    pub async fn retry(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {
+        self.started_at = None;
+        self.stop_watcher();
+        {
+            let mut ring = self.ring_buffer.lock();
+            ring.begin_resync();
+            ring.video_last_instant = None;
+            ring.audio_last_instant = None;
+        }
+        self.health.reset();
+
+        let p = self.gstreamer_pipeline.pipeline.clone();
+        if let Ok(Err(e)) | Err(e) =
+            tokio::task::spawn_blocking(move || p.set_state(::gstreamer::State::Null))
+                .await
+                .map_err(|e| WayclipError::Validation(e.to_string().into()))
+        {
+            log::warn!("pipeline NULL before retry failed: {e}");
+        }
+
+        self.watch(sender)?;
+        self.gstreamer_pipeline.start().await?;
+        self.started_at = Some(Instant::now());
+        Ok(())
+    }
+
+    fn watch(&mut self, sender: mpsc::Sender<CoreEvent>) -> Result<(), WayclipError> {
+        self.watcher = Some(self.gstreamer_pipeline.pipeline.spawn_watcher(sender)?);
+        Ok(())
+    }
+
+    pub fn stop_watcher(&mut self) {
+        if let Some(ref w) = self.watcher {
+            w.stop();
+        }
+        self.watcher = None;
+    }
+}

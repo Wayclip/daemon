@@ -1,17 +1,10 @@
-pub(crate) mod common;
-pub use common::remux::RemuxHandler;
+pub mod common;
+
+#[cfg(all(feature = "linux", feature = "windows"))]
+compile_error!("Windows & Linux mutually exclusive");
 
 #[cfg(feature = "linux")]
-pub(crate) mod linux;
+pub mod linux;
 
 #[cfg(feature = "windows")]
 pub(crate) mod windows;
-
-#[cfg(feature = "linux")]
-pub use linux::core::types::*;
-#[cfg(feature = "linux")]
-pub use linux::doctor::*;
-#[cfg(feature = "linux")]
-pub use linux::manager::*;
-#[cfg(feature = "linux")]
-pub use linux::pipewire::*;
