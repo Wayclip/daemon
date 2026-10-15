@@ -32,9 +32,39 @@ impl KeybindsService {
                 log::error!("Controller keybind failed: {e}");
             }
         }
-        if let Err(e) = self.desktop.create_auto_bind(command_sender) {
-            log::error!("Desktop keybind failed (bind manually): {e}");
-        }
+
+        let sender = command_sender.clone();
+        let trigger = user_settings.shortcuts.save_clip.clone();
+
+        tokio::spawn(async move {
+            let mut backoff = std::time::Duration::from_secs(2);
+
+            loop {
+                let mut desktop = match DesktopManager::new(trigger.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        log::error!("Desktop keybind setup failed: {e}");
+                        return;
+                    }
+                };
+
+                if desktop.is_ready() {
+                    match desktop.create_auto_bind(&sender) {
+                        Ok(()) => {
+                            log::info!("Desktop keybind registered");
+                            return;
+                        }
+                        Err(e) => {
+                            log::error!("Desktop keybind failed, retrying: {e}");
+                        }
+                    }
+                }
+
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+            }
+        });
+
         Ok(())
     }
 

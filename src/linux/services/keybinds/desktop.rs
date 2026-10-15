@@ -187,10 +187,16 @@ impl DesktopManager {
         Ok(())
     }
 
+    pub fn is_ready(&self) -> bool {
+        self.desktop != DesktopEnvironmentType::Unknown
+    }
+
     pub fn create_auto_bind(
         &mut self,
         command_sender: &mpsc::Sender<IpcCommand>,
     ) -> Result<(), WayclipError> {
+        self.desktop = Self::get_env_session()?.0;
+
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
                 let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");

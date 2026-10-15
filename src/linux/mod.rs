@@ -32,7 +32,7 @@ use crate::{
         memory::MemoryManager,
         recovery::{Problem, Recovery},
         services::DaemonServices,
-        session::CurrentSession,
+        session::{CurrentSession, env::SessionVariable},
     },
 };
 
@@ -100,6 +100,8 @@ impl DaemonCore {
     /// state, where we will recording, accept IPC calls, and wait for further termination input.
     /// This will be a wrapper arouund setup() so we can change state if something fails inside
     pub async fn start(&mut self) -> Result<(), WayclipError> {
+        SessionVariable::import_from_user_manager();
+
         tokio::spawn(MemoryManager::run_trim());
         // Put ourselves into the activating status & send notification to user that daemon is
         // starting
