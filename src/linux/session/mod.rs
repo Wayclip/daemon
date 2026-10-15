@@ -4,6 +4,8 @@ use wayclip_core::{models::clips::games::Game, settings::UserSettings};
 
 use crate::common::misc::extra::WayclipTime;
 
+pub mod env;
+
 /// Struct responsible for the current session of wayclip. If an error occurs and daemon restarts,
 /// this data will get persisted.
 ///

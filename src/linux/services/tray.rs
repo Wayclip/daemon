@@ -174,23 +174,35 @@ impl TrayManager {
         let config = self.config.clone();
 
         let handle = tokio::spawn(async move {
-            let tray = Tray {
-                command_sender: cmd_sender.clone(),
-                stats: None,
-                config: config.clone(),
-                cancel_token: cancel_token.clone(),
-            };
-            let poll = config.show_stats || config.show_status;
+            let mut backoff = Duration::from_secs(2);
 
-            let handle = match tray.spawn().await {
-                Ok(handle) => handle,
-                Err(e) => {
-                    log::error!("Failed to register tray: {e}");
-                    return;
+            let handle = loop {
+                let tray = Tray {
+                    command_sender: cmd_sender.clone(),
+                    stats: None,
+                    config: config.clone(),
+                    cancel_token: cancel_token.clone(),
+                };
+
+                match tray.spawn().await {
+                    Ok(handle) => break handle,
+                    Err(e) => {
+                        log::error!(
+                            "Failed to register tray: {e}. retrying in {}s",
+                            backoff.as_secs()
+                        );
+
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => return,
+                            _ = tokio::time::sleep(backoff) => {}
+                        }
+
+                        backoff = (backoff * 2).min(Duration::from_secs(30));
+                    }
                 }
             };
 
-            log::info!("Tray registered successfully");
+            let poll = config.show_stats || config.show_status;
 
             if poll {
                 let pid = Pid::from(std::process::id() as usize);
