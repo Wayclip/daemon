@@ -6,7 +6,8 @@
 The crate `wayclip-daemon` provides important processes and pipelines for intialising, managing and debugging the Wayclip daemon.
 Wayclip daemon provides the functionality to record and process data.
 
-> **Note:** `wayclip-daemon` is designed as a background service and is controlled via `wayclip-cli`.
+> **Note:** `wayclip-daemon` is designed as a background service and is controlled via `wayclip-cli`. However, it can still be used as a standalone binary for recording your screen.
+
 
 ## Libraries Required
 
