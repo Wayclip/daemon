@@ -1,3 +1,4 @@
+use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use wayclip_core::{models::error::WayclipError, settings::UserSettings};
@@ -68,6 +69,20 @@ impl DaemonServices {
                 }
             }
         }
+
+        // if user saved clip, the status would've updated, but it is not changed back unless a game
+        // has changed. now, we make sure to update status once last clip was more than 3 min ago
+        if let Some(ref last) = current_session.last_clip
+            && last
+                .timestamp
+                .signed_duration_since(Utc::now())
+                .num_minutes()
+                >= 3
+        {
+            if let Some(ref d) = self.discord {
+                d.set_recording(current_session.clone());
+            }
+        }
         Ok(())
     }
 
@@ -83,9 +98,16 @@ impl DaemonServices {
         &mut self,
         user_settings: &UserSettings,
         command_sender: &mpsc::Sender<IpcCommand>,
+        current_session: &mut CurrentSession,
     ) -> Result<(), WayclipError> {
         self.tray.start(command_sender);
-        self.keybinds.setup_keybinds(user_settings, command_sender)
+        self.keybinds
+            .setup_keybinds(user_settings, command_sender)?;
+        // active it once, so even if no game is playing, discord status shows up
+        if let Some(ref d) = self.discord {
+            d.set_recording(current_session.clone());
+        }
+        Ok(())
     }
 
     pub async fn stop_services(&mut self) -> Result<(), WayclipError> {

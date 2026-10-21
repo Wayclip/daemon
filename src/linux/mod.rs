@@ -37,6 +37,8 @@ use crate::{
 };
 
 const STALL_LIMIT: Duration = Duration::from_secs(10);
+const STARTUP_STALL_LIMIT: Duration = Duration::from_secs(2);
+const STARTUP_WINDOW: Duration = Duration::from_secs(30);
 
 pub mod engine;
 pub mod ipc;
@@ -174,6 +176,7 @@ impl DaemonCore {
         self.services.start_services(
             &self.current_session.user_settings,
             &self.ipc.command_sender,
+            &mut self.current_session.clone(),
         )?;
 
         self.engine
@@ -250,8 +253,8 @@ impl DaemonCore {
                             self.run_due_recovery().await;
                         } else if self.engine.capture_degraded() {
                             self.recovery.schedule(Problem::Degraded);
-                        } else if self.engine.is_stalled(STALL_LIMIT) {
-                            log::warn!("no video frames for {}s", STALL_LIMIT.as_secs());
+                        } else if self.engine.is_stalled(self.stall_limit()) {
+                            log::warn!("no video frames for {}s", self.stall_limit().as_secs());
                             self.recovery.schedule(Problem::Stalled);
                         } else if self.engine.dmabuf_retry_due() {
                             self.retry_dmabuf().await;
@@ -319,9 +322,16 @@ impl DaemonCore {
         Ok(())
     }
 
-    /// We need a separate method to handle changing statuses, because some will require just
-    /// changing daemon status field, whilst others will also require sending an sd_notify command
-    /// to systemd
+    fn stall_limit(&self) -> Duration {
+        match self.engine.uptime() {
+            // basically on initial startup, we will get a cold node and 99% of time its gonna die
+            // -> so recover fast from that.
+            // then once we are running, go back to our default stall time
+            Some(up) if up < STARTUP_WINDOW => STARTUP_STALL_LIMIT,
+            _ => STALL_LIMIT,
+        }
+    }
+
     fn update_status(&mut self, status: DaemonStatus) -> Result<(), WayclipError> {
         match status {
             DaemonStatus::Inactive => {

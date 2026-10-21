@@ -41,7 +41,7 @@ pub struct DaemonEngine {
     gstreamer_pipeline: DaemonEngineGStreamer,
     ring_buffer: Arc<Mutex<RingBuffer>>,
     pub watcher: Option<BusWatcher>,
-    started_at: Option<Instant>,
+    pub started_at: Option<Instant>,
     /// we can track the current mode of capture and change it as time goes on
     pub capture_mode: CaptureMode,
     health: Arc<CaptureHealth>,
@@ -240,6 +240,10 @@ impl DaemonEngine {
             Some(last) => last.elapsed() > limit,
             None => started.elapsed() > limit,
         }
+    }
+
+    pub fn uptime(&self) -> Option<Duration> {
+        self.started_at.map(|s| s.elapsed())
     }
 
     pub async fn recover(
