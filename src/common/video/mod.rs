@@ -5,7 +5,7 @@ use crate::common::{
         element::GStreamerElementType,
         pipeline::GStreamerPipeline,
     },
-    video::ring::data::{ContentType, SaveData},
+    video::ring::data::SaveData,
 };
 use gstreamer::{
     ClockTime,
@@ -231,7 +231,6 @@ impl SaveManager {
                 frames: video_frames,
                 base_pts,
                 offset_ms: 0,
-                content_type: ContentType::Video,
             },
         ));
 
@@ -267,7 +266,6 @@ impl SaveManager {
                     frames: audio_frames,
                     base_pts,
                     offset_ms: 0,
-                    content_type: ContentType::Audio,
                 },
             ));
         }

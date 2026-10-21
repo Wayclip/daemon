@@ -21,7 +21,6 @@ pub enum VideoXRawMemory {
 
 #[derive(Clone, Debug, Display)]
 pub enum VideoXRawFormat {
-    RGBA,
     NV12,
     I420,
 }

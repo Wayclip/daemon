@@ -2,7 +2,7 @@ use gstreamer::{BufferCopyFlags, BufferFlags, Caps, ClockTime};
 use gstreamer_app::{AppSink, AppSrc};
 use wayclip_core::models::error::WayclipError;
 
-use crate::common::video::ring::data::{ContentType, EncodedFrame};
+use crate::common::video::ring::data::EncodedFrame;
 
 const DEFAULT_APPSRC_FORMAT: gstreamer::Format = gstreamer::Format::Time;
 const DEFAULT_APPSRC_IS_LIVE: bool = false;
@@ -98,7 +98,6 @@ impl GStreamerApp {
 
 pub struct EncodedFrameInfo {
     pub frames: Vec<EncodedFrame>,
-    pub content_type: ContentType,
     pub base_pts: ClockTime,
     pub offset_ms: i64,
 }

@@ -31,7 +31,7 @@ impl GStreamer {
 
     // --- Pads ---
 
-    pub fn get_static_pad(element: &Element, pad_name: &str) -> Result<Pad, WayclipError> {
+    pub fn _get_static_pad(element: &Element, pad_name: &str) -> Result<Pad, WayclipError> {
         element.static_pad(pad_name).ok_or_else(|| {
             WayclipError::Remux(
                 format!(
@@ -44,7 +44,7 @@ impl GStreamer {
         })
     }
 
-    pub fn request_pad(element: &Element, template: &str) -> Result<Pad, WayclipError> {
+    pub fn _request_pad(element: &Element, template: &str) -> Result<Pad, WayclipError> {
         element.request_pad_simple(template).ok_or_else(|| {
             WayclipError::Remux(
                 format!(
@@ -57,7 +57,7 @@ impl GStreamer {
         })
     }
 
-    pub fn link_pads(src_pad: &Pad, sink_pad: &Pad) -> Result<(), WayclipError> {
+    pub fn _link_pads(src_pad: &Pad, sink_pad: &Pad) -> Result<(), WayclipError> {
         src_pad.link(sink_pad).map_err(|err| {
             let src_elem = src_pad
                 .parent_element()
@@ -83,26 +83,26 @@ impl GStreamer {
         Ok(())
     }
 
-    pub fn link_static_pads(
+    pub fn _link_static_pads(
         src: &Element,
         src_pad_name: &str,
         sink: &Element,
         sink_pad_name: &str,
     ) -> Result<(), WayclipError> {
-        let src_pad = Self::get_static_pad(src, src_pad_name)?;
-        let sink_pad = Self::get_static_pad(sink, sink_pad_name)?;
-        Self::link_pads(&src_pad, &sink_pad)
+        let src_pad = Self::_get_static_pad(src, src_pad_name)?;
+        let sink_pad = Self::_get_static_pad(sink, sink_pad_name)?;
+        Self::_link_pads(&src_pad, &sink_pad)
     }
 
-    pub fn link_to_request_pad(
+    pub fn _link_to_request_pad(
         src: &Element,
         src_pad_name: &str,
         dest: &Element,
         dest_pad_template: &str,
     ) -> Result<Pad, WayclipError> {
-        let src_pad = Self::get_static_pad(src, src_pad_name)?;
-        let sink_pad = Self::request_pad(dest, dest_pad_template)?;
-        Self::link_pads(&src_pad, &sink_pad)?;
+        let src_pad = Self::_get_static_pad(src, src_pad_name)?;
+        let sink_pad = Self::_request_pad(dest, dest_pad_template)?;
+        Self::_link_pads(&src_pad, &sink_pad)?;
         Ok(sink_pad)
     }
 
