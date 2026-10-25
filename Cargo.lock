@@ -4298,7 +4298,7 @@ dependencies = [
 
 [[package]]
 name = "wayclip-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "ashpd",
  "bitflags 2.13.2",

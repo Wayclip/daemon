@@ -42,7 +42,7 @@ sysinfo = "0.39.3"
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7.19"
 url = { version = "2.5.8", features = ["serde"] }
-wayclip-core = { version = "0.1.4", features = ["errors", "daemon"] }
+wayclip-core = { version = "0.1.5", features = ["errors", "daemon"] }
 wayclip-global-hotkey = "0.7.0"
 zbus = { version = "5.16.0", default-features = false, features = ["blocking"] }
 
