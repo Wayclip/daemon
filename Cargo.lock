@@ -2223,6 +2223,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mimalloc"
+version = "0.1.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
+dependencies = [
+ "libmimalloc-sys",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4298,8 +4307,9 @@ dependencies = [
 
 [[package]]
 name = "wayclip-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
+ "arc-swap",
  "ashpd",
  "bitflags 2.13.2",
  "chrono",
@@ -4340,7 +4350,7 @@ dependencies = [
 
 [[package]]
 name = "wayclip-daemon"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ashpd",
  "chrono",
@@ -4357,6 +4367,7 @@ dependencies = [
  "libc",
  "libmimalloc-sys",
  "log",
+ "mimalloc",
  "parking_lot",
  "sd-notify",
  "serde",

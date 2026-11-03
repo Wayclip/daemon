@@ -1,6 +1,10 @@
+use mimalloc::MiMalloc;
 use std::io::IsTerminal;
 use std::io::Write;
 use wayclip_daemon::linux::memory::MemoryManager;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> std::process::ExitCode {
     match std::io::stderr().is_terminal() {

@@ -1,6 +1,6 @@
 [package]
 name = "wayclip-daemon"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Recording and management of Wayclip daemon"
 readme = "README.md"
@@ -33,6 +33,7 @@ ksni = "0.3.6"
 libc = "0.2.189"
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 log = "0.4.33"
+mimalloc = "0.1.52"
 parking_lot = "0.12.5"
 sd-notify = "0.5.0"
 serde = "1.0.228"
@@ -42,7 +43,7 @@ sysinfo = "0.39.3"
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7.19"
 url = { version = "2.5.8", features = ["serde"] }
-wayclip-core = { version = "0.1.5", features = ["errors", "daemon"] }
+wayclip-core = { version = "0.1.6", features = ["errors", "daemon"] }
 wayclip-global-hotkey = "0.7.0"
 zbus = { version = "5.16.0", default-features = false, features = ["blocking"] }
 

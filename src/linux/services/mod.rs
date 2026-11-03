@@ -1,7 +1,15 @@
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
+
 use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use wayclip_core::{models::error::WayclipError, settings::UserSettings};
+use wayclip_core::{
+    models::{clips::games::GameRegistry, error::WayclipError},
+    settings::UserSettings,
+};
 
 use crate::{
     common::misc::discord::{DiscordPresenceManager, DiscordPresenceState},
@@ -16,9 +24,13 @@ pub mod discovery;
 pub mod keybinds;
 pub mod tray;
 
+// Perhaps in future, we might have to also update other things on run-time. Then i will make a new
+// module, for now keep it all here.
+static UPDATER_STARTED: AtomicBool = AtomicBool::new(false);
+
 pub struct DaemonServices {
     pub discovery: Option<Discovery>,
-    discord: Option<DiscordPresenceManager>,
+    discord: Option<(DiscordPresenceManager, Instant)>,
     keybinds: KeybindsService,
     tray: TrayManager,
 }
@@ -46,7 +58,10 @@ impl DaemonServices {
                     DiscordPresenceState::Default
                 };
 
-                Some(DiscordPresenceManager::new(state))
+                Some((
+                    DiscordPresenceManager::new(state),
+                    Instant::now() - Duration::from_secs(60),
+                ))
             }
             false => None,
         };
@@ -60,35 +75,45 @@ impl DaemonServices {
     }
 
     pub fn update(&mut self, current_session: &mut CurrentSession) -> Result<(), WayclipError> {
-        if let Some(ref mut disc) = self.discovery {
-            if let Some(new_game) = disc.poll_changed() {
-                log::info!("Game changed to: {:?}", new_game.as_ref().map(|g| &g.name));
-                current_session.tick(new_game, None);
-                if let Some(ref d) = self.discord {
-                    d.set_recording(current_session.clone());
-                }
-            }
+        let mut session_changed = false;
+
+        if let Some(ref mut disc) = self.discovery
+            && let Some(new_game) = disc.poll_changed()
+        {
+            log::info!("Game changed to: {:?}", new_game.as_ref().map(|g| &g.name));
+
+            current_session.tick(new_game, None);
+            session_changed = true;
         }
 
-        // if user saved clip, the status would've updated, but it is not changed back unless a game
-        // has changed. now, we make sure to update status once last clip was more than 3 min ago
-        if let Some(ref last) = current_session.last_clip
-            && last
-                .timestamp
-                .signed_duration_since(Utc::now())
-                .num_minutes()
-                >= 3
+        let is_recently_saved = current_session
+            .last_clip
+            .as_ref()
+            .is_some_and(|l| Utc::now().signed_duration_since(l.timestamp).num_seconds() < 15);
+
+        let now = Instant::now();
+        let refresh_needed = self.discord.as_ref().map_or(false, |d| {
+            now.duration_since(d.1) >= Duration::from_secs(30)
+        });
+
+        if (session_changed || refresh_needed)
+            && let Some(ref mut d) = self.discord
         {
-            if let Some(ref d) = self.discord {
-                d.set_recording(current_session.clone());
+            if is_recently_saved {
+                d.0.set_saving(current_session.clone());
+            } else {
+                d.0.set_recording(current_session.clone());
             }
+
+            d.1 = now;
         }
+
         Ok(())
     }
 
     pub fn saving(&mut self, current_session: CurrentSession) -> Result<(), WayclipError> {
         if let Some(ref d) = self.discord {
-            d.set_saving(current_session);
+            d.0.set_saving(current_session);
         }
 
         Ok(())
@@ -100,12 +125,16 @@ impl DaemonServices {
         command_sender: &mpsc::Sender<IpcCommand>,
         current_session: &mut CurrentSession,
     ) -> Result<(), WayclipError> {
+        // every 12h (not that user will for sure spend 12h)
+        if !UPDATER_STARTED.swap(true, Ordering::Relaxed) {
+            GameRegistry::spawn_periodic_updater(Duration::from_secs(12 * 60 * 60));
+        }
         self.tray.start(command_sender);
         self.keybinds
             .setup_keybinds(user_settings, command_sender)?;
         // active it once, so even if no game is playing, discord status shows up
         if let Some(ref d) = self.discord {
-            d.set_recording(current_session.clone());
+            d.0.set_recording(current_session.clone());
         }
         Ok(())
     }

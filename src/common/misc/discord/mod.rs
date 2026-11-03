@@ -79,13 +79,21 @@ impl DiscordPresenceManager {
         }
     }
 
-    fn get_saved_buttons(last_clip_info: Option<LastClipInfo>) -> Vec<Button<'static>> {
+    fn get_saved_buttons(
+        last_clip_info: Option<LastClipInfo>,
+        promo_enabled: bool,
+    ) -> Vec<Button<'static>> {
         let mut buttons = Vec::new();
 
         if let Some(clip_info) = last_clip_info
             && let Some(url) = clip_info.url
         {
             buttons.push(Button::new(clip_info.name, url.to_string()));
+        }
+
+        if promo_enabled && buttons.len() < 2 {
+            // TODO: Fix hardcoded URL
+            buttons.push(Button::new("Get Wayclip", "https://wayclip.com"));
         }
 
         buttons
@@ -161,11 +169,35 @@ impl DiscordPresenceManager {
                             }
                         },
                         PresenceCommand::SavingEvent { current_session } => match state_clone {
-                            DiscordPresenceState::Default => Activity::new()
-                                .state("Saved clip")
-                                .details("Just saved a new clip using Wayclip!")
-                                .activity_type(ActivityType::Playing)
-                                .buttons(Self::get_saved_buttons(current_session.last_clip)),
+                            DiscordPresenceState::Default => {
+                                let mut activity = Activity::new()
+                                    .state("Saved clip")
+                                    .details("Just saved a new clip using Wayclip!");
+
+                                if let Some(g) = current_session.game.clone() {
+                                    let mut assets = Assets::new();
+                                    if let Some(icon) = g.icon_url.clone() {
+                                        assets = assets
+                                            .large_image(icon)
+                                            .small_image("wayclip-logo")
+                                            .large_text(g.name.clone())
+                                            .small_text("Saved with Wayclip");
+                                    }
+                                    activity = activity
+                                        .assets(assets)
+                                        .name(g.name.clone())
+                                        .state("Saved clip")
+                                        .details(format!("Just saved a clip from {}!", g.name));
+                                }
+
+                                activity
+                                    .activity_type(ActivityType::Playing)
+                                    // TODO: A way to disable promo
+                                    .buttons(Self::get_saved_buttons(
+                                        current_session.last_clip,
+                                        true,
+                                    ))
+                            }
                             DiscordPresenceState::Custom(ref custom_config) => {
                                 custom_config.get_activity(&current_session)
                             }
