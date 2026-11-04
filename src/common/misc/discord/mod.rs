@@ -100,8 +100,8 @@ impl DiscordPresenceManager {
     }
 
     fn get_recording_buttons(
-        promo_enabled: bool,
         user_session_info: Option<UserSessionInfo>,
+        promo_enabled: bool,
     ) -> Vec<Button<'static>> {
         let mut buttons = Vec::new();
 
@@ -153,10 +153,13 @@ impl DiscordPresenceManager {
 
                                 activity = activity
                                     .activity_type(ActivityType::Playing)
-                                    // TODO: A way to disable promo
                                     .buttons(Self::get_recording_buttons(
-                                        true,
                                         current_session.user_session,
+                                        current_session
+                                            .user_settings
+                                            .game_discovery
+                                            .discord_rich_presence
+                                            .enable_promo,
                                     ))
                                     .timestamps(
                                         Timestamps::new()
@@ -190,13 +193,16 @@ impl DiscordPresenceManager {
                                         .details(format!("Just saved a clip from {}!", g.name));
                                 }
 
-                                activity
-                                    .activity_type(ActivityType::Playing)
-                                    // TODO: A way to disable promo
-                                    .buttons(Self::get_saved_buttons(
+                                activity.activity_type(ActivityType::Playing).buttons(
+                                    Self::get_saved_buttons(
                                         current_session.last_clip,
-                                        true,
-                                    ))
+                                        current_session
+                                            .user_settings
+                                            .game_discovery
+                                            .discord_rich_presence
+                                            .enable_promo,
+                                    ),
+                                )
                             }
                             DiscordPresenceState::Custom(ref custom_config) => {
                                 custom_config.get_activity(&current_session)

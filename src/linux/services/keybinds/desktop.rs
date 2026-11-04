@@ -226,11 +226,15 @@ impl DesktopManager {
             DesktopEnvironmentType::Gnome | DesktopEnvironmentType::Kde => {
                 self.setup_global_hotkey(command_sender)?
             }
-            _ => info!(
-                "No auto bind setup available for your desktop environment. Please bind {} to {}",
-                self.trigger_combo,
-                self.get_trigger_command_string()
-            ),
+            _ => {
+                return Err(WayclipError::CLI(
+                    format!(
+                        "Desktop environment '{:?}' not recognized or not ready yet",
+                        self.desktop
+                    )
+                    .into(),
+                ));
+            }
         }
 
         Ok(())
