@@ -52,16 +52,26 @@ pub struct DiscordPresenceManager {
 }
 
 impl DiscordPresenceManager {
-    fn set_activity(client: &mut Option<DiscordIpcClient>, activity: Activity) {
+    fn set_activity(
+        client: &mut Option<DiscordIpcClient>,
+        activity: Activity,
+        logged_disconnected: &mut bool,
+    ) {
         if client.is_none() {
             let mut c = DiscordIpcClient::new(WAYCLIP_DISCORD_CLIENT_ID);
             match c.connect() {
                 Ok(()) => {
                     log::debug!("Connected to Discord IPC");
                     *client = Some(c);
+                    *logged_disconnected = false;
                 }
                 Err(e) => {
-                    log::debug!("Discord not available: {e}");
+                    if !*logged_disconnected {
+                        log::warn!(
+                            "Discord client not active: {e}. Background listener waiting for Discord..."
+                        );
+                        *logged_disconnected = true;
+                    }
                     return;
                 }
             }
@@ -76,6 +86,7 @@ impl DiscordPresenceManager {
         if set_activity_failed {
             log::warn!("Failed to set Discord activity");
             *client = None;
+            *logged_disconnected = false;
         }
     }
 
@@ -130,6 +141,7 @@ impl DiscordPresenceManager {
             .name("discord-presence".into())
             .spawn(move || {
                 let mut client: Option<DiscordIpcClient> = None;
+                let mut logged_disconnected = false;
                 for command in rx {
                     let activity = match command {
                         PresenceCommand::RecordingEvent { current_session } => match state_clone {
@@ -209,7 +221,7 @@ impl DiscordPresenceManager {
                             }
                         },
                     };
-                    Self::set_activity(&mut client, activity);
+                    Self::set_activity(&mut client, activity, &mut logged_disconnected);
                 }
 
                 if let Some(mut c) = client.take() {

@@ -130,8 +130,9 @@ impl DaemonServices {
             GameRegistry::spawn_periodic_updater(Duration::from_secs(12 * 60 * 60));
         }
         self.tray.start(command_sender);
-        self.keybinds
-            .setup_keybinds(user_settings, command_sender)?;
+        if let Err(e) = self.keybinds.setup_keybinds(user_settings, command_sender) {
+            log::warn!("Keybinds error: {e:?}");
+        }
         // active it once, so even if no game is playing, discord status shows up
         if let Some(ref d) = self.discord {
             d.0.set_recording(current_session.clone());

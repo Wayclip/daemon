@@ -141,8 +141,10 @@ impl DesktopManager {
         );
 
         if let Err(e) = manager.register(hotkey) {
-            log::error!("Failed to register global hotkey: {e:?}");
-            return Ok(());
+            //log::error!("Failed to register global hotkey: {e:?}");
+            return Err(WayclipError::Config(
+                format!("Failed to register hotkey: {e:?}").into(),
+            ));
         }
 
         log::debug!("Registered a shortcut");

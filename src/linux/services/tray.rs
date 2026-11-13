@@ -174,7 +174,7 @@ impl TrayManager {
         let config = self.config.clone();
 
         let handle = tokio::spawn(async move {
-            let mut backoff = Duration::from_secs(2);
+            let mut first_attempt = true;
 
             let handle = loop {
                 let tray = Tray {
@@ -187,17 +187,15 @@ impl TrayManager {
                 match tray.spawn().await {
                     Ok(handle) => break handle,
                     Err(e) => {
-                        log::error!(
-                            "Failed to register tray: {e}. retrying in {}s",
-                            backoff.as_secs()
-                        );
+                        if first_attempt {
+                            log::warn!("Tray not available: {e}. Suspending until available.");
+                            first_attempt = false;
+                        }
 
                         tokio::select! {
                             _ = cancel_token.cancelled() => return,
-                            _ = tokio::time::sleep(backoff) => {}
+                            _ = tokio::time::sleep(Duration::from_secs(30)) => {}
                         }
-
-                        backoff = (backoff * 2).min(Duration::from_secs(30));
                     }
                 }
             };

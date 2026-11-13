@@ -1,7 +1,9 @@
 use mimalloc::MiMalloc;
 use std::io::IsTerminal;
 use std::io::Write;
+use std::time::Duration;
 use wayclip_daemon::linux::memory::MemoryManager;
+use wayclip_daemon::linux::session::env::SessionVariable;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -9,6 +11,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() -> std::process::ExitCode {
     match std::io::stderr().is_terminal() {
         true => env_logger::Builder::from_default_env()
+            .filter_module("discord_rich_presence", log::LevelFilter::Off)
             .format(|buf, record| {
                 let style = buf.default_level_style(record.level());
                 write!(
@@ -39,6 +42,7 @@ fn main() -> std::process::ExitCode {
     }
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let code = rt.block_on(async {
+        SessionVariable::wait_for_session(Duration::from_secs(15)).await;
         let mut core = match wayclip_daemon::linux::DaemonCore::new() {
             Ok(c) => c,
             Err(e) => {

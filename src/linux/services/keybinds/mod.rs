@@ -4,6 +4,7 @@ use wayclip_core::{models::error::WayclipError, settings::UserSettings};
 use crate::linux::{
     ipc::commands::IpcCommand,
     services::keybinds::{controller::ControllerManager, desktop::DesktopManager},
+    session::env::SessionVariable,
 };
 
 pub mod controller;
@@ -40,28 +41,34 @@ impl KeybindsService {
             let mut backoff = std::time::Duration::from_secs(2);
 
             loop {
+                SessionVariable::import_from_user_manager();
+
                 let mut desktop = match DesktopManager::new(trigger.clone()) {
                     Ok(d) => d,
                     Err(e) => {
-                        log::error!("Desktop keybind setup failed: {e}");
-                        return;
+                        log::debug!("Desktop keybind not ready yet ({e}). retrying...");
+                        tokio::time::sleep(backoff).await;
+                        continue;
                     }
                 };
 
                 if desktop.is_ready() {
                     match desktop.create_auto_bind(&sender) {
                         Ok(()) => {
-                            log::info!("Desktop keybind registered");
+                            log::info!(
+                                "Desktop keybind registered successfully ({:?})",
+                                desktop.desktop
+                            );
                             return;
                         }
                         Err(e) => {
-                            log::error!("Desktop keybind failed, retrying: {e}");
+                            log::warn!("Desktop keybind registration failed, retrying: {e}");
                         }
                     }
                 }
 
                 tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(15));
             }
         });
 

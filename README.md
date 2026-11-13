@@ -8,7 +8,6 @@ Wayclip daemon provides the functionality to record and process data.
 
 > **Note:** `wayclip-daemon` is designed as a background service and is controlled via `wayclip-cli`. However, it can still be used as a standalone binary for recording your screen.
 
-
 ## Libraries Required
 
 | Package Name                 | Required? | Minimum Version | Notes                                                                         |
@@ -18,7 +17,7 @@ Wayclip daemon provides the functionality to record and process data.
 | `gstreamer-plugins-good`     | Yes       | `>= 1.24`       | Provides elements like `matroskamux` & `watchdog`                             |
 | `gstreamer-plugins-bad`      | Yes       | `>= 1.24`       | Provides encoders like `h264parse`, `vah264enc` (VAAPI), `nvh264enc` (NVIDIA) |
 | `gstreamer-plugins-ugly`     | Yes       | `>= 1.24`       | Provides software encoder `x264enc`                                           |
-| `libpipewire-0.3`            | Yes       | `>= 0.3.0`      | Required by `pipewire`                                                        |
+| `libpipewire-0.3`            | Yes       | `>= 0.3.0`      | Required by `pipewire`. Might require RPM Fusion for Fedora                   |
 | `libudev`                    | Yes       | `>= 199`        | Required by `gilrs`                                                           |
 | `alsa-lib`                   | Yes       | `>= 1.0.27`     | Required by `rodio`                                                           |
 

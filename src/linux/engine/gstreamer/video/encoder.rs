@@ -22,7 +22,7 @@ impl VideoEncoderFactory {
         match codec.get_backend() {
             CodecType::NVIDIA => Self::build_nvidia_pipeline(codec, bitrate, gop),
             CodecType::VAAPI => Self::build_vaapi_pipeline(codec, bitrate, gop),
-            CodecType::Software => Self::build_software_pipeline(codec, bitrate, gop),
+            CodecType::Software => Self::build_software_pipeline(codec, bitrate, gop as u32),
         }
     }
 
@@ -75,7 +75,7 @@ impl VideoEncoderFactory {
     fn build_software_pipeline(
         codec: &VideoCodec,
         bitrate: u32,
-        gop: i32,
+        gop: u32,
     ) -> Result<Element, WayclipError> {
         let threads = std::thread::available_parallelism()
             .map(|n| n.get() as u32)

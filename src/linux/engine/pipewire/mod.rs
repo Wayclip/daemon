@@ -17,7 +17,7 @@ use wayclip_core::models::{daemon::pipewire::PipewireManager, error::WayclipErro
 
 const DEFAULT_SOURCE_TYPE: SourceType = SourceType::Monitor;
 const DEFAULT_RESTORE_TOKEN_PATH: &str = "wayclip/restore_token";
-const DEFAULT_CURSOR_MODE: CursorMode = CursorMode::Embedded;
+const DEFAULT_CURSOR_MODE: CursorMode = CursorMode::Hidden;
 const DEFAULT_PERSIST_MODE: PersistMode = PersistMode::ExplicitlyRevoked;
 
 // We use ashpd to capute the screen, however, the input is provided by pipewire anyway

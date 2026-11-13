@@ -55,7 +55,7 @@ impl VideoNvidia {
         if last.as_ref() != Some(&(encoder.clone(), cuda)) {
             if cuda {
                 log::info!(
-                    "NVIDIA capture: CUDA path ({}), no EGL context, no DMABuf zero-copy",
+                    "CUDA path ({}); no EGL context; no DMABuf zero-copy",
                     if reason.is_empty() {
                         "auto-detected"
                     } else {
@@ -63,7 +63,7 @@ impl VideoNvidia {
                     }
                 );
             } else {
-                log::info!("NVIDIA capture: OpenGL path, {reason}");
+                log::info!("OpenGL path: {reason}");
             }
             *last = Some((encoder, cuda));
         }

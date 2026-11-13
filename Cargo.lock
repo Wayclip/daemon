@@ -4307,10 +4307,11 @@ dependencies = [
 
 [[package]]
 name = "wayclip-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "arc-swap",
  "ashpd",
+ "base64",
  "bitflags 2.13.2",
  "chrono",
  "colored",
