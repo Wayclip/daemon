@@ -83,7 +83,7 @@ impl SaveData {
     pub fn get_video_structure(&self) -> Result<&StructureRef, WayclipError> {
         self.video_caps
             .structure(0)
-            .ok_or_else(|| WayclipError::Remux("Video caps has no structure".into()))
+            .ok_or_else(|| WayclipError::Fatal("Video caps has no structure".into()))
     }
 
     pub fn get_audio_structure(&self) -> Result<Option<(&Caps, &StructureRef)>, WayclipError> {

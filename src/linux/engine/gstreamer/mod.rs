@@ -125,7 +125,7 @@ impl DaemonEngineGStreamer {
         let last = self
             .pipeline
             .last_element()
-            .ok_or_else(|| WayclipError::Video("No last video element".into()))?;
+            .ok_or_else(|| WayclipError::Error("No last video element".into()))?;
 
         self.pipeline.add(video_appsink_ref)?;
         self.pipeline.link(&last, video_appsink_ref)?;
@@ -152,7 +152,7 @@ impl DaemonEngineGStreamer {
         let last = self
             .pipeline
             .last_element()
-            .ok_or_else(|| WayclipError::Audio("No last audio element".into()))?;
+            .ok_or_else(|| WayclipError::Error("No last audio element".into()))?;
 
         self.pipeline.add(audio_appsink_ref)?;
         self.pipeline.link(&last, audio_appsink_ref)?;

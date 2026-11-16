@@ -70,7 +70,7 @@ impl DaemonServices {
             discord,
             discovery,
             tray: TrayManager::new(user_settings.tray.clone(), cancel_token.clone()),
-            keybinds: KeybindsService::new(user_settings)?,
+            keybinds: KeybindsService::new(cancel_token),
         })
     }
 
@@ -142,6 +142,6 @@ impl DaemonServices {
 
     pub async fn stop_services(&mut self) -> Result<(), WayclipError> {
         self.tray.stop().await;
-        self.keybinds.stop()
+        self.keybinds.stop().await
     }
 }

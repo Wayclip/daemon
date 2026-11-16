@@ -99,7 +99,7 @@ impl GStreamerPipeline {
         let dest_ref = dest.upcast_ref::<Element>();
 
         src_ref.link(dest_ref).map_err(|_| {
-            WayclipError::Remux(
+            WayclipError::Fatal(
                 format!(
                     "Failed to link element '{}' to '{}'",
                     src_ref.name(),
@@ -141,7 +141,7 @@ impl GStreamerPipeline {
         let bus = self
             .pipeline
             .bus()
-            .ok_or_else(|| WayclipError::Remux("No bus found".into()))?;
+            .ok_or_else(|| WayclipError::Fatal("No bus found".into()))?;
 
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_nanos(timeout.nseconds());
@@ -159,7 +159,7 @@ impl GStreamerPipeline {
                     }
                     MessageView::Error(e) => {
                         log::error!("Pipeline error: {:?}", e);
-                        break Err(WayclipError::Remux(
+                        break Err(WayclipError::Fatal(
                             format!("Pipeline error: {:?}", e).into(),
                         ));
                     }
@@ -169,7 +169,7 @@ impl GStreamerPipeline {
                     _ => {}
                 },
                 None => {
-                    break Err(WayclipError::Remux(
+                    break Err(WayclipError::Fatal(
                         format!("Pipeline timed out after {}s", timeout).into(),
                     ));
                 }
@@ -233,7 +233,7 @@ impl GStreamerPipeline {
             let bus = self
                 .pipeline
                 .bus()
-                .ok_or_else(|| WayclipError::Remux("No pipeline bus".into()))?;
+                .ok_or_else(|| WayclipError::Fatal("No pipeline bus".into()))?;
             let mut reason = "unknown".to_string();
             while let Some(msg) = bus.timed_pop(gstreamer::ClockTime::ZERO) {
                 if let gstreamer::MessageView::Error(e) = msg.view() {
@@ -242,7 +242,7 @@ impl GStreamerPipeline {
                 }
             }
             let _ = self.pipeline.set_state(gstreamer::State::Null);
-            return Err(WayclipError::Remux(
+            return Err(WayclipError::Fatal(
                 format!("Pipeline failed to reach PLAYING state for preview: {reason}").into(),
             ));
         }

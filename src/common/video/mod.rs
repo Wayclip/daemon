@@ -69,7 +69,7 @@ impl DataStream {
                 Self::Audio(codec.get_parser().to_string())
             }
             _ => {
-                return Err(WayclipError::Remux(
+                return Err(WayclipError::Fatal(
                     format!("Unrecognised structure: {}", structure.name()).into(),
                 ));
             }
@@ -124,7 +124,7 @@ impl SaveManager {
         // Make suure we actually have video frames. (Audio frames missing is not critical)
         // Also make sure the parent dir is fully created
         if save_data.video_frames.is_empty() {
-            return Err(WayclipError::Remux("No video frames were captured!".into()));
+            return Err(WayclipError::Error("No video frames were captured!".into()));
         }
         if let Some(parent) = output_path.parent() {
             create_dir_all(parent)?;
@@ -212,11 +212,11 @@ impl SaveManager {
         // TODO: DYNAMIC PADS
         let video_mux_pad = mux
             .request_pad_simple(video_stream.pad_template(&video_format))
-            .ok_or_else(|| WayclipError::Remux("Couldnt request video pad from muxer".into()))?;
+            .ok_or_else(|| WayclipError::Fatal("Couldnt request video pad from muxer".into()))?;
 
         video_parser
             .static_pad("src")
-            .ok_or_else(|| WayclipError::Remux("No static src pad".into()))?
+            .ok_or_else(|| WayclipError::Fatal("No static src pad".into()))?
             .link(&video_mux_pad)?;
 
         // We can create a vector of stream data, so we can add streams before to it based off
@@ -253,11 +253,11 @@ impl SaveManager {
             let audio_mux_pad = mux
                 .request_pad_simple(audio_stream.pad_template(&video_format))
                 .ok_or_else(|| {
-                    WayclipError::Remux("Couldnt request audio pad from muxer".into())
+                    WayclipError::Fatal("Couldnt request audio pad from muxer".into())
                 })?;
             audio_parser
                 .static_pad("src")
-                .ok_or_else(|| WayclipError::Remux("No static src pad".into()))?
+                .ok_or_else(|| WayclipError::Fatal("No static src pad".into()))?
                 .link(&audio_mux_pad)?;
 
             streams.push((
@@ -286,7 +286,7 @@ impl SaveManager {
                     first.get_or_insert(e);
                 }
                 Err(_) => {
-                    first.get_or_insert(WayclipError::Remux("push thread panicked".into()));
+                    first.get_or_insert(WayclipError::Fatal("push thread panicked".into()));
                 }
             }
         }

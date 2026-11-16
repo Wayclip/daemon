@@ -1,8 +1,9 @@
 use crate::linux::ipc::commands::IpcCommand;
 use log::info;
-use std::{env, process::Command};
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use std::thread::JoinHandle;
+use std::{env, process::Command, time::Duration};
+use tokio::{runtime::Handle, sync::mpsc, sync::oneshot};
+use tokio_util::sync::CancellationToken;
 use wayclip_core::models::daemon::{
     DEFAULT_DBUS_INTERFACE as IFACE, DEFAULT_DBUS_SERVICE as SVC, DEFAULT_INTERFACE_PATH as PATH,
 };
@@ -11,14 +12,6 @@ use wayclip_core::models::input::keyboard::WayclipKeyCombo;
 use wayclip_global_hotkey::GlobalHotKeyEvent;
 use wayclip_global_hotkey::HotKeyState;
 use wayclip_global_hotkey::{GlobalHotKeyManager, hotkey::HotKey};
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum SessionType {
-    X11,
-    Wayland,
-    #[default]
-    Unknown,
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DesktopEnvironmentType {
@@ -35,49 +28,51 @@ pub struct DesktopManager {
     pub trigger_combo: WayclipKeyCombo,
     hotkey_manager: Option<GlobalHotKeyManager>,
     registered_hotkey: Option<HotKey>,
+    listener: Option<JoinHandle<()>>,
+    cancel_token: CancellationToken,
 }
 
 impl DesktopManager {
-    pub fn new(trigger_combo: WayclipKeyCombo) -> Result<Self, WayclipError> {
-        let (desktop, _) = Self::get_env_session()?;
-
+    pub fn new(
+        trigger_combo: WayclipKeyCombo,
+        cancel_token: CancellationToken,
+    ) -> Result<Self, WayclipError> {
         Ok(Self {
-            desktop,
+            desktop: Self::detect_desktop(),
             trigger_combo,
             hotkey_manager: None,
             registered_hotkey: None,
+            listener: None,
+            cancel_token,
         })
     }
 
-    pub fn get_env_session() -> Result<(DesktopEnvironmentType, SessionType), WayclipError> {
-        let session_env = env::var("XDG_SESSION_TYPE").unwrap_or("wayland".to_string());
-        let session = match session_env.to_lowercase().as_str() {
-            "wayland" => SessionType::Wayland,
-            "x11" | "xorg" => SessionType::X11,
-            _ => SessionType::Unknown,
-        };
-
-        let desktop_env = env::var("XDG_CURRENT_DESKTOP")
+    pub fn detect_desktop() -> DesktopEnvironmentType {
+        env::var("XDG_CURRENT_DESKTOP")
             .unwrap_or_default()
-            .to_lowercase();
-        let desktop = desktop_env
+            .to_lowercase()
             .split(':')
-            .find_map(|d| match d {
-                "hyprland" => Some(DesktopEnvironmentType::Hyprland),
-                "gnome" => Some(DesktopEnvironmentType::Gnome),
-                "sway" => Some(DesktopEnvironmentType::Sway),
-                "kde" => Some(DesktopEnvironmentType::Kde),
-                _ => None,
+            .find_map(|d| {
+                let d = d.trim();
+                if d.contains("hyprland") {
+                    Some(DesktopEnvironmentType::Hyprland)
+                } else if d.contains("gnome") {
+                    Some(DesktopEnvironmentType::Gnome)
+                } else if d.contains("sway") {
+                    Some(DesktopEnvironmentType::Sway)
+                } else if d.contains("kde") || d.contains("plasma") {
+                    Some(DesktopEnvironmentType::Kde)
+                } else {
+                    None
+                }
             })
-            .unwrap_or(DesktopEnvironmentType::Unknown);
-
-        Ok((desktop, session))
+            .unwrap_or(DesktopEnvironmentType::Unknown)
     }
 
     fn run_command(mut cmd: Command, desc: &str) -> Result<(), WayclipError> {
         let output = cmd
             .output()
-            .map_err(|e| WayclipError::CLI(format!("Failed to execute '{desc}': {e}").into()))?;
+            .map_err(|e| WayclipError::Error(format!("Failed to execute '{desc}': {e}").into()))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -91,7 +86,7 @@ impl DesktopManager {
                 format!("process exited with code {:?}", output.status.code())
             };
 
-            return Err(WayclipError::CLI(
+            return Err(WayclipError::Error(
                 format!("Command '{desc}' failed: {err_msg}").into(),
             ));
         }
@@ -99,11 +94,16 @@ impl DesktopManager {
         Ok(())
     }
 
+    fn escape(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     // instead of calling CLI to execute a call, we just call dbus directly..
     fn get_trigger_command_string(&self) -> String {
         match self.desktop {
-            DesktopEnvironmentType::Kde => format!("qdbus {SVC} {PATH} {IFACE}.SaveClip"),
-            DesktopEnvironmentType::Gnome => format!(
+            DesktopEnvironmentType::Kde
+            | DesktopEnvironmentType::Gnome
+            | DesktopEnvironmentType::Unknown => format!(
                 "gdbus call --session --dest {SVC} --object-path {PATH} --method {IFACE}.SaveClip"
             ),
             _ => format!("busctl --user call {SVC} {PATH} {IFACE} SaveClip"),
@@ -118,91 +118,95 @@ impl DesktopManager {
             log::error!("Failed to unregister hotkey: {e:?}");
         }
 
+        if let Some(listener) = self.listener.take() {
+            let _ = listener.join();
+        }
+
         Ok(())
     }
 
     fn setup_global_hotkey(
         &mut self,
         command_sender: &mpsc::Sender<IpcCommand>,
+        handle: Handle,
     ) -> Result<(), WayclipError> {
-        log::info!("Using wayclip_global_hotkey");
-
-        let manager = match GlobalHotKeyManager::new() {
-            Ok(m) => m,
-            Err(e) => {
-                log::error!("Failed to initialize GlobalHotKeyManager (portal missing?): {e:?}");
-                return Ok(());
-            }
-        };
+        let manager = GlobalHotKeyManager::new().map_err(|e| {
+            WayclipError::Error(format!("Failed to initialize GlobalHotKeyManager: {e:?}").into())
+        })?;
 
         let hotkey = HotKey::new(
             Some(self.trigger_combo.key_modifiers.clone().into()),
             self.trigger_combo.key_code.clone().into(),
         );
 
-        if let Err(e) = manager.register(hotkey) {
-            //log::error!("Failed to register global hotkey: {e:?}");
-            return Err(WayclipError::Config(
-                format!("Failed to register hotkey: {e:?}").into(),
-            ));
-        }
+        manager
+            .register(hotkey)
+            .map_err(|e| WayclipError::Error(format!("Failed to register hotkey: {e:?}").into()))?;
 
-        log::debug!("Registered a shortcut");
         self.hotkey_manager = Some(manager);
         self.registered_hotkey = Some(hotkey);
 
         let command_sender = command_sender.clone();
         let hotkey_id = hotkey.id();
+        let cancel_token = self.cancel_token.clone();
 
-        let handle = tokio::runtime::Handle::current();
-        std::thread::Builder::new()
+        let listener = std::thread::Builder::new()
             .name("hotkey-listener".into())
             .spawn(move || {
-                while let Ok(event) = GlobalHotKeyEvent::receiver().recv() {
-                    if event.id() == hotkey_id && event.state() == HotKeyState::Released {
-                        let tx = command_sender.clone();
-                        handle.spawn(async move {
-                            let (sender, receiver) = oneshot::channel();
-                            if tx
-                                .send(IpcCommand::SaveClip {
-                                    custom_name: None,
-                                    responder: sender,
-                                })
-                                .await
-                                .is_err()
-                            {
-                                log::warn!("Daemon core offline, could not trigger clip");
-                                return;
-                            }
-                            match receiver.await {
-                                Ok(Ok(name)) => {
-                                    log::info!("Clip saved successfully via hotkey: {name}")
-                                }
-                                Ok(Err(e)) => log::error!("Failed to save clip: {e:?}"),
-                                Err(_) => log::warn!("Daemon core dropped reply channel"),
-                            }
-                        });
+                while !cancel_token.is_cancelled() {
+                    let Ok(event) =
+                        GlobalHotKeyEvent::receiver().recv_timeout(Duration::from_millis(200))
+                    else {
+                        continue;
+                    };
+
+                    if event.id() != hotkey_id || event.state() != HotKeyState::Released {
+                        continue;
                     }
+
+                    let tx = command_sender.clone();
+                    handle.spawn(async move {
+                        let (sender, receiver) = oneshot::channel();
+                        if tx
+                            .send(IpcCommand::SaveClip {
+                                custom_name: None,
+                                responder: sender,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            log::warn!("could not trigger clip");
+                            return;
+                        }
+                        match receiver.await {
+                            Ok(Ok(name)) => {
+                                log::info!("clip saved successfully via hotkey {name}")
+                            }
+                            Ok(Err(e)) => log::error!("failed to save clip {e:?}"),
+                            Err(_) => log::warn!("dropped reply channel"),
+                        }
+                    });
                 }
             })?;
 
-        Ok(())
-    }
+        log::debug!("Registered a shortcut");
+        self.listener = Some(listener);
 
-    pub fn is_ready(&self) -> bool {
-        self.desktop != DesktopEnvironmentType::Unknown
+        Ok(())
     }
 
     pub fn create_auto_bind(
         &mut self,
         command_sender: &mpsc::Sender<IpcCommand>,
+        handle: Handle,
     ) -> Result<(), WayclipError> {
-        self.desktop = Self::get_env_session()?.0;
+        self.desktop = Self::detect_desktop();
 
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
-                let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");
-                let trigger_cmd = self.get_trigger_command_string();
+                let bind_string =
+                    Self::escape(&self.trigger_combo.clone().to_string().replace("+", " + "));
+                let trigger_cmd = Self::escape(&self.get_trigger_command_string());
 
                 let full_string = format!(
                     "hl.bind(\"{}\", hl.dsp.exec_cmd(\"{}\"))",
@@ -224,19 +228,7 @@ impl DesktopManager {
                     .arg(&trigger_cmd);
                 Self::run_command(cmd, "swaymsg bindsym")?;
             }
-            //DesktopEnvironmentType::Hyprland
-            DesktopEnvironmentType::Gnome | DesktopEnvironmentType::Kde => {
-                self.setup_global_hotkey(command_sender)?
-            }
-            _ => {
-                return Err(WayclipError::CLI(
-                    format!(
-                        "Desktop environment '{:?}' not recognized or not ready yet",
-                        self.desktop
-                    )
-                    .into(),
-                ));
-            }
+            _ => self.setup_global_hotkey(command_sender, handle)?,
         }
 
         Ok(())
@@ -245,7 +237,8 @@ impl DesktopManager {
     pub fn remove_auto_bind(&mut self) -> Result<(), WayclipError> {
         match self.desktop {
             DesktopEnvironmentType::Hyprland => {
-                let bind_string = self.trigger_combo.clone().to_string().replace("+", " + ");
+                let bind_string =
+                    Self::escape(&self.trigger_combo.clone().to_string().replace("+", " + "));
                 let full_string = format!("hl.unbind(\"{}\")", bind_string);
 
                 let mut cmd = Command::new("hyprctl");
@@ -259,13 +252,8 @@ impl DesktopManager {
                 cmd.arg("unbindsym").arg(&bind_string);
                 Self::run_command(cmd, "swaymsg unbindsym")?;
             }
-            //DesktopEnvironmentType::Hyprland
-            DesktopEnvironmentType::Gnome | DesktopEnvironmentType::Kde => {
-                self.remove_global_hotkey()?
-            }
-            _ => info!("No auto bind removal available for your desktop environment",),
+            _ => info!("No auto bind removal available for your desktop environment"),
         }
-
-        Ok(())
+        self.remove_global_hotkey()
     }
 }

@@ -65,7 +65,7 @@ impl Nvidia {
         }
 
         let exe = std::env::current_exe().map_err(|e| {
-            WayclipError::Video(format!("Could not resolve own executable path: {e}").into())
+            WayclipError::Error(format!("Could not resolve own executable path: {e}").into())
         })?;
 
         log::info!("Re-executing so the NVIDIA video memory profile applies to this process");
@@ -75,7 +75,7 @@ impl Nvidia {
             .chain([OsString::from(REEXEC_FLAG)]);
         let error = Command::new(exe).args(args).exec();
 
-        Err(WayclipError::Video(
+        Err(WayclipError::Error(
             format!("Could not re-exec for NVIDIA video memory profile: {error}").into(),
         ))
     }

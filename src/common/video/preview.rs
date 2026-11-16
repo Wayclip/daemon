@@ -35,7 +35,7 @@ impl PreviewManager {
         }
         // Make sure the original file actually exists
         if !input_path.exists() {
-            return Err(WayclipError::Remux("Preview file does not exist".into()));
+            return Err(WayclipError::Error("Preview file does not exist".into()));
         }
 
         // Initialise our custom pipeline object
@@ -110,11 +110,11 @@ impl PreviewManager {
 
         // Acquire pads for probing and muxing
         let mux_sink_pad = mux.request_pad_simple("video_%u").ok_or_else(|| {
-            WayclipError::Remux("Failed to request video pad from matroskamux".into())
+            WayclipError::Fatal("Failed to request video pad from matroskamux".into())
         })?;
         let parser_pad = parser
             .static_pad("src")
-            .ok_or_else(|| WayclipError::Remux("No static src pad".into()))?;
+            .ok_or_else(|| WayclipError::Fatal("No static src pad".into()))?;
 
         let eos_sent = Arc::new(AtomicBool::new(false));
         let eos_sent_clone = eos_sent.clone();

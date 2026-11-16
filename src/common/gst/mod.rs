@@ -33,7 +33,7 @@ impl GStreamer {
 
     pub fn _get_static_pad(element: &Element, pad_name: &str) -> Result<Pad, WayclipError> {
         element.static_pad(pad_name).ok_or_else(|| {
-            WayclipError::Remux(
+            WayclipError::Fatal(
                 format!(
                     "Pad '{}' not found on element '{}'",
                     pad_name,
@@ -46,7 +46,7 @@ impl GStreamer {
 
     pub fn _request_pad(element: &Element, template: &str) -> Result<Pad, WayclipError> {
         element.request_pad_simple(template).ok_or_else(|| {
-            WayclipError::Remux(
+            WayclipError::Fatal(
                 format!(
                     "Could not request pad template '{}' on element '{}'",
                     template,
@@ -68,7 +68,7 @@ impl GStreamer {
                 .map(|e| e.name().to_string())
                 .unwrap_or_else(|| "unknown".into());
 
-            WayclipError::Remux(
+            WayclipError::Fatal(
                 format!(
                     "Failed to link pad '{}:{}' to '{}:{}': {:?}",
                     src_elem,

@@ -53,7 +53,7 @@ impl GStreamerApp {
                     .payload
                     .copy_region(BufferCopyFlags::MEMORY | BufferCopyFlags::FLAGS, ..)
                     .map_err(|e| {
-                        WayclipError::Remux(format!("Failed to copy buffer: {e:?}").into())
+                        WayclipError::Fatal(format!("Failed to copy buffer: {e:?}").into())
                     })?;
 
                 let pts = GStreamerApp::sync_timestamp(
@@ -83,13 +83,13 @@ impl GStreamerApp {
                 }
 
                 appsrc.push_buffer(payload).map_err(|e| {
-                    WayclipError::Remux(format!("Failed to push buffer: {:?}", e).into())
+                    WayclipError::Fatal(format!("Failed to push buffer: {:?}", e).into())
                 })?;
             }
 
             appsrc
                 .end_of_stream()
-                .map_err(|e| WayclipError::Remux(format!("Failed to send EOS: {:?}", e).into()))?;
+                .map_err(|e| WayclipError::Fatal(format!("Failed to send EOS: {:?}", e).into()))?;
 
             Ok(())
         })

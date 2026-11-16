@@ -118,7 +118,7 @@ impl DaemonEnginePipewire {
             // query streams & extract data
             let streams = start_request.response()?;
             let stream = streams.streams().first().ok_or_else(|| {
-                WayclipError::Screencast("Could not extract first stream in response".into())
+                WayclipError::Fatal("Could not extract first stream in response".into())
             })?;
 
             let node_id = stream.pipe_wire_node_id().to_string();

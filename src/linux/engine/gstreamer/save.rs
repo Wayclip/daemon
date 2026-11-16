@@ -39,7 +39,7 @@ impl SavePipelineFactory {
                 "Cannot save clip: Not enough frames in buffer yet. Stream might be lagging.",
             );
             log::warn!("{}", message);
-            return Err(WayclipError::Ring(message.into()));
+            return Err(WayclipError::Error(message.into()));
         }
 
         let (video_bytes, audio_bytes) = saved_data.get_bytes();
@@ -66,7 +66,7 @@ impl SavePipelineFactory {
                 predicted_size_mb, user_settings.output.limit.max_size_mb
             );
             log::warn!("{}", message);
-            return Err(WayclipError::Ring(message.into()));
+            return Err(WayclipError::Error(message.into()));
         }
 
         // 0 means unbounded
@@ -78,7 +78,7 @@ impl SavePipelineFactory {
                 user_settings.output.limit.max_clips
             );
             log::warn!("{}", message);
-            return Err(WayclipError::Ring(message.into()));
+            return Err(WayclipError::Error(message.into()));
         }
 
         let duration = saved_data.duration;

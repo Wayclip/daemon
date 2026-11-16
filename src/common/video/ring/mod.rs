@@ -192,11 +192,11 @@ impl RingBuffer {
         Ok((
             self.video_frames
                 .front()
-                .ok_or_else(|| WayclipError::Ring("No front video frame".into()))?
+                .ok_or_else(|| WayclipError::Fatal("No front video frame".into()))?
                 .pts,
             self.video_frames
                 .back()
-                .ok_or_else(|| WayclipError::Ring("No back video frame".into()))?
+                .ok_or_else(|| WayclipError::Fatal("No back video frame".into()))?
                 .pts,
         ))
     }
@@ -300,11 +300,11 @@ impl RingBuffer {
     pub fn get_snapshot(&self) -> Result<SaveData, WayclipError> {
         // Video caps needed for re-encoding
         let video_caps = self.video_caps.clone().ok_or_else(|| {
-            WayclipError::Ring("No video caps - pipeline may not have started yet".into())
+            WayclipError::Error("No video caps - pipeline may not have started yet".into())
         })?;
 
         if self.video_frames.is_empty() {
-            return Err(WayclipError::Ring(
+            return Err(WayclipError::Error(
                 "Ring buffer is empty - nothing to save".into(),
             ));
         }
@@ -324,7 +324,7 @@ impl RingBuffer {
             .iter()
             .position(|f| f.is_keyframe)
             .ok_or_else(|| {
-                WayclipError::Ring("No keyframe in buffer yet, try again in a moment".into())
+                WayclipError::Error("No keyframe in buffer yet, try again in a moment".into())
             })?;
 
         if keyframe_idx > 0 {

@@ -7,10 +7,6 @@ use std::{
 
 const MEMORY_PROFILE: &str = r#"[Service]
 # wayclip-daemon
-Environment=MALLOC_ARENA_MAX=2
-Environment=MALLOC_TRIM_THRESHOLD_=131072
-Environment=MALLOC_MMAP_THRESHOLD_=131072
-Environment=MALLOC_TOP_PAD_=0
 Environment=MIMALLOC_PURGE_DELAY=0
 Environment=MIMALLOC_ARENA_PURGE_MULT=1
 "#;
