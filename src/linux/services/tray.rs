@@ -229,7 +229,7 @@ impl TrayManager {
                                 let mut cpu = 0.0;
                                 let mut mem = 0.0;
                                 if let Some(proc) = sys.process(pid) {
-                                    cpu = proc.cpu_usage() / sys.cpus().len() as f32;
+                                    cpu = proc.cpu_usage() / sys.cpus().len().max(1) as f32;
                                     mem = proc.memory() as f64 / 1000.0 / 1000.0;
                                 }
 

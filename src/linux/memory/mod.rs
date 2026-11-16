@@ -58,7 +58,9 @@ impl MemoryManager {
         t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             t.tick().await;
-            let _ = tokio::task::spawn_blocking(Self::trim).await;
+            if let Err(e) = tokio::task::spawn_blocking(Self::trim).await {
+                log::warn!("memory trim task failed: {e}");
+            }
         }
     }
 

@@ -70,6 +70,9 @@ impl WindowFocusScanner {
         }
 
         let len = u32::from_le_bytes(header[6..10].try_into().ok()?) as usize;
+        if len > 1024 * 1024 {
+            return None;
+        }
         let mut body = vec![0u8; len];
         stream.read_exact(&mut body).ok()?;
 

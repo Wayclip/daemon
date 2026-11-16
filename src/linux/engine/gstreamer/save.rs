@@ -181,22 +181,19 @@ impl SavePipelineFactory {
             .and_then(|n| n.to_str())
             .unwrap_or("");
         let name = name.strip_suffix(&format!(".{ext}")).unwrap_or(name);
+        // basically this is to match the upload standard
         let cleaned: String = name
             .chars()
             .map(|c| {
-                // char::from(92) is `\`
-                if c.is_control()
-                    || c == char::from(92)
-                    || matches!(c, '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-                {
-                    '_'
-                } else {
+                if c.is_ascii_alphanumeric() || matches!(c, '_' | ' ' | '-') {
                     c
+                } else {
+                    '_'
                 }
             })
             .collect();
-        let cleaned: String = cleaned.trim().trim_matches('.').chars().take(120).collect();
-        if cleaned.is_empty() {
+        let cleaned: String = cleaned.trim().trim_matches('.').chars().take(100).collect();
+        if cleaned.len() < 3 {
             "clip".into()
         } else {
             cleaned

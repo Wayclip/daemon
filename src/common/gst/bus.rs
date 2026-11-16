@@ -44,8 +44,7 @@ impl BusWatcher {
                 };
 
                 if let Some(ev) = event {
-                    let _ = events.blocking_send(ev);
-                    break;
+                    events.blocking_send(ev).ok();
                 }
             }
         });

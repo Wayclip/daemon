@@ -1,6 +1,7 @@
 use mimalloc::MiMalloc;
 use std::io::IsTerminal;
 use std::io::Write;
+use std::process::ExitCode;
 use std::time::Duration;
 use wayclip_daemon::linux::memory::MemoryManager;
 use wayclip_daemon::linux::session::env::SessionVariable;
@@ -40,21 +41,27 @@ fn main() -> std::process::ExitCode {
     if let Err(e) = MemoryManager::reserve_video_memory() {
         log::warn!("Could not apply the NVIDIA video memory profile: {e}");
     }
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            log::error!("could not create tokio runtime: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let code = rt.block_on(async {
         SessionVariable::wait_for_session(Duration::from_secs(15)).await;
         let mut core = match wayclip_daemon::linux::DaemonCore::new() {
             Ok(c) => c,
             Err(e) => {
                 log::error!("{e}");
-                return 1.into();
+                return ExitCode::FAILURE;
             }
         };
         match core.start().await {
-            Ok(()) => 0.into(),
+            Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 log::error!("{e}");
-                1.into()
+                ExitCode::FAILURE
             }
         }
     });

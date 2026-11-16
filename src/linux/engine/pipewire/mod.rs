@@ -130,9 +130,14 @@ impl DaemonEnginePipewire {
         }
         .await;
 
-        let Ok((streams, node_id, file_descriptor)) = result else {
-            let _ = session.close().await;
-            return Err(WayclipError::Fatal("select source fail".into()));
+        let (streams, node_id, file_descriptor) = match result {
+            Ok(data) => data,
+            Err(e) => {
+                session.close().await.ok();
+                return Err(WayclipError::Fatal(
+                    format!("select source fail: {e}").into(),
+                ));
+            }
         };
 
         // now extract token from streams & save it

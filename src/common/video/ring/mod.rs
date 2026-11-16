@@ -266,7 +266,7 @@ impl RingBuffer {
                             "audio and video PTS are on different timelines (gap > 5s). not pruning audio"
                         );
                     }
-                    continue;
+                    break;
                 }
                 while self.audio_frames.front().is_some_and(|a| a.pts < threshold) {
                     if let Some(p) = self.audio_frames.pop_front() {
@@ -409,6 +409,19 @@ impl RingBuffer {
     pub fn flush_frames(&mut self) {
         self.video_frames.clear();
         self.audio_frames.clear();
+        // The PTS anchors and resync state refer to frames that no longer
+        // exist. Keeping them makes the next snapshot normalize against stale
+        // timestamps and produce invalid PTS.
+        self.video_first_pts = None;
+        self.audio_first_pts = None;
+        self.video_start_instant = None;
+        self.audio_start_instant = None;
+        self.video_pts_offset_ns = 0;
+        self.audio_pts_offset_ns = 0;
+        self.awaiting_video_resync = false;
+        self.awaiting_audio_resync = false;
+        self.video_resync_reference = None;
+        self.audio_resync_reference = None;
         self.total_buffer_bytes = 0;
     }
 

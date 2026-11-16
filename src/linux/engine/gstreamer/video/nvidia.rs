@@ -6,7 +6,9 @@ pub struct VideoNvidia;
 impl VideoNvidia {
     // Check if current system has cuda supported.
     fn cuda_path_supported(codec: &VideoCodec) -> Result<(), String> {
-        let _ = gstreamer::init();
+        if let Err(e) = gstreamer::init() {
+            log::error!("gstreamer::init failed: {e:?}");
+        }
 
         for element in ["cudaupload", "cudaconvertscale"] {
             if gstreamer::ElementFactory::find(element).is_none() {

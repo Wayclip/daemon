@@ -26,7 +26,9 @@ pub struct GetStateResult {
 
 impl GStreamerPipeline {
     pub fn new() -> Self {
-        let _ = gstreamer::init();
+        if let Err(e) = gstreamer::init() {
+            log::error!("gstreamer::init failed: {e:?}");
+        }
         Self {
             pipeline: gstreamer::Pipeline::new(),
             tracked_elements: Arc::new(Mutex::new(Vec::new())),
