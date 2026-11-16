@@ -7,7 +7,7 @@ use gstreamer::{
     prelude::{ElementExt, ElementExtManual, PadExt, PadExtManual},
 };
 use std::{
-    fs::create_dir_all,
+    fs::{self, create_dir_all},
     path::Path,
     sync::{
         Arc,
@@ -22,6 +22,17 @@ use wayclip_core::{
 pub struct PreviewManager;
 
 impl PreviewManager {
+    // kind of a copy of `doctor` module, but this time only for preview so we can get better
+    // errors.
+    fn require_element(factory: &str, hint: &str) -> Result<(), WayclipError> {
+        if gstreamer::ElementFactory::find(factory).is_none() {
+            return Err(WayclipError::Error(
+                format!("GStreamer element '{factory}' is required. {hint}").into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// This method is responsible for accepting an input path -- the original path of the video
     /// file -- as well as the output path that user wants to write final preview to. The preview
     /// will contain a low-bitrate and low-res 5 second version of the original video.
@@ -29,6 +40,9 @@ impl PreviewManager {
     /// To keep this method re-usable, we will accept an input path instead of direct bytes/buffers
     /// of data streams
     pub fn generate_preview(input_path: &Path, output_path: &Path) -> Result<(), WayclipError> {
+        gstreamer::init().ok();
+        Self::require_element("x264enc", "Install the GStreamer 'ugly' plugins")?;
+
         // Make sure the parent directories exist
         if let Some(parent) = output_path.parent() {
             create_dir_all(parent)?;
@@ -75,11 +89,16 @@ impl PreviewManager {
         let encoder = GStreamer::build_element(GStreamerElementType::X264Enc)?;
         let parser = GStreamer::build_element(GStreamerElementType::H264Parse)?;
 
+        // easier and safer
+        let temp_path = output_path.with_extension("mkv.tmp");
+
         // Multiplex and write to disk
         let mux = GStreamer::build_element(GStreamerElementType::MatroskaMux)?;
         let file_sink = GStreamer::build_element(GStreamerElementType::FileSink {
-            location: output_path.to_path_buf(),
+            location: temp_path.clone(),
         })?;
+
+        let audio_sink = GStreamer::build_element(GStreamerElementType::FakeSink)?;
 
         // 1. Add all elements to the pipeline
         pipeline.add_many([
@@ -93,6 +112,7 @@ impl PreviewManager {
             &parser,
             &mux,
             &file_sink,
+            &audio_sink,
         ])?;
 
         // 2. Link upstream: file_src -> decode_bin
@@ -105,8 +125,8 @@ impl PreviewManager {
         pipeline.link(&caps_filter, &encoder)?;
         pipeline.link(&encoder, &parser)?;
 
-        // 4. Link decode_bin to video_convert_1 dynamically
         GStreamer::link_dynamic_pad(&decode_bin, video_convert_1, "video/");
+        GStreamer::link_dynamic_pad(&decode_bin, audio_sink, "audio/");
 
         // Acquire pads for probing and muxing
         let mux_sink_pad = mux.request_pad_simple("video_%u").ok_or_else(|| {
@@ -151,7 +171,13 @@ impl PreviewManager {
         pipeline.link(&mux, &file_sink)?;
 
         // Play and wait for the pipeline to play out
-        pipeline.play_and_wait_eos(ClockTime::from_seconds(10), ClockTime::from_seconds(30))?;
+        if let Err(e) =
+            pipeline.play_and_wait_eos(ClockTime::from_seconds(10), ClockTime::from_seconds(30))
+        {
+            fs::remove_file(&temp_path).ok();
+            return Err(e);
+        }
+        fs::rename(&temp_path, output_path)?;
 
         // Preview are hardcoded MKV files
         log::debug!(

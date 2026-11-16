@@ -22,8 +22,7 @@ use crate::linux::engine::gstreamer::video::nvidia::VideoNvidia;
 use crate::linux::engine::pipewire::DaemonEngineConnectionData;
 use wayclip_core::settings::recording::CodecType;
 
-// P.S Before was `1`
-const DEFAULT_CONFIG_INTERVAL: i32 = -1;
+const DEFAULT_CONFIG_INTERVAL: i32 = 1;
 const DEFAULT_GST_LEAKY_DOWNSTREAM: &str = "2";
 const DEFAULT_MAX_SIZE_BUFFER: u32 = 2;
 const DEFAULT_MAX_SIZE_BYTES: u32 = 0;

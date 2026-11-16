@@ -107,19 +107,30 @@ impl GStreamer {
     }
 
     pub fn link_dynamic_pad(src: &Element, sink: Element, prefix: &'static str) {
+        let src_elem = src.clone();
         src.connect_pad_added(move |_, src_pad| {
             let caps = src_pad
                 .current_caps()
                 .unwrap_or_else(|| src_pad.query_caps(None));
-            let Some(structure) = caps.structure(0) else {
+
+            if !caps.iter().any(|s| s.name().starts_with(prefix)) {
+                return;
+            }
+
+            let Some(sink_pad) = sink.static_pad("sink") else {
                 return;
             };
+            if sink_pad.is_linked() {
+                return;
+            }
 
-            if structure.name().starts_with(prefix)
-                && let Some(sink_pad) = sink.static_pad("sink")
-                && !sink_pad.is_linked()
-            {
-                src_pad.link(&sink_pad).ok();
+            if let Err(e) = src_pad.link(&sink_pad) {
+                log::error!(
+                    "Failed to link dynamic pad '{}' from '{}' to '{}': {e:?}",
+                    src_pad.name(),
+                    src_elem.name(),
+                    sink.name()
+                );
             }
         });
     }

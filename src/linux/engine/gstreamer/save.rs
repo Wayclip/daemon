@@ -1,6 +1,7 @@
 use gstreamer::ClockTime;
 use parking_lot::Mutex;
 use std::fmt::Write;
+use std::fs::create_dir_all;
 use std::{path::Path, sync::Arc};
 use tokio::sync::oneshot;
 use wayclip_core::{
@@ -47,6 +48,16 @@ impl SavePipelineFactory {
         // add 1.5%
         let predicted_bytes = ((video_bytes + audio_bytes) as f64 * 1.015) as u64;
         let predicted_size_mb = predicted_bytes / 1000000;
+
+        // for safety
+        let output = &user_settings.output;
+        for dir in [
+            &output.clip_directory.0,
+            &output.preview_directory.0,
+            &output.metadata_directory.0,
+        ] {
+            create_dir_all(dir)?;
+        }
 
         // didnt wanna do this, but its better and more consitant
         let all_clips = ClipsQuery::get_all_local_clips().await?;

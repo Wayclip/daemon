@@ -51,6 +51,7 @@ pub enum GStreamerElementType {
     FileSource {
         location: PathBuf,
     },
+    FakeSink,
     AudioPipewireSrc {
         do_timestamp: bool,
         target_object: Cow<'static, str>,
@@ -225,6 +226,19 @@ impl GStreamerElementType {
                     "location",
                     GStreamerElementPropertyValue::typed(location.to_value()),
                 )],
+            ),
+            Self::FakeSink => GStreamerElement::new(
+                "fakesink",
+                vec![
+                    GStreamerElementProperty::new(
+                        "sync",
+                        GStreamerElementPropertyValue::typed(false),
+                    ),
+                    GStreamerElementProperty::new(
+                        "async",
+                        GStreamerElementPropertyValue::typed(false),
+                    ),
+                ],
             ),
         }
     }
