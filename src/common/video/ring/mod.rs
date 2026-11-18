@@ -409,9 +409,6 @@ impl RingBuffer {
     pub fn flush_frames(&mut self) {
         self.video_frames.clear();
         self.audio_frames.clear();
-        // The PTS anchors and resync state refer to frames that no longer
-        // exist. Keeping them makes the next snapshot normalize against stale
-        // timestamps and produce invalid PTS.
         self.video_first_pts = None;
         self.audio_first_pts = None;
         self.video_start_instant = None;
